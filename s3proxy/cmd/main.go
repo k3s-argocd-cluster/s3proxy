@@ -4,7 +4,6 @@ Copyright (c) Intrinsec 2024
 
 SPDX-License-Identifier: AGPL-3.0-only
 */
-
 /*
 Package main parses command line flags and starts the s3proxy server.
 */

@@ -11,7 +11,6 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -108,6 +107,7 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+	}
 
 	plaintext := body
 	rawEncryptedDEK, ok := output.Metadata[dekTag]
@@ -204,8 +204,22 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 }
 
 func setPutObjectHeaders(w http.ResponseWriter, output *s3.PutObjectOutput) {
+	if output.ETag != nil {
+		w.Header().Set("ETag", strings.Trim(*output.ETag, "\""))
+	}
 	setHeaderIfNonEmpty(w.Header(), "x-amz-version-id", output.VersionId)
-	setDefaultObjectHeaders(w, output)
+	setHeaderIfNonEmpty(w.Header(), "x-amz-expiration", output.Expiration)
+	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-crc32", output.ChecksumCRC32)
+	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-crc32c", output.ChecksumCRC32C)
+	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-sha1", output.ChecksumSHA1)
+	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-sha256", output.ChecksumSHA256)
+	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-customer-algorithm", output.SSECustomerAlgorithm)
+	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-customer-key-MD5", output.SSECustomerKeyMD5)
+	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-aws-kms-key-id", output.SSEKMSKeyId)
+	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-context", output.SSEKMSEncryptionContext)
+	if output.ServerSideEncryption != "" {
+		w.Header().Set("x-amz-server-side-encryption", string(output.ServerSideEncryption))
+	}
 }
 
 func handleGetObjectError(w http.ResponseWriter, err error, requestID string, log *logger.Logger) {
@@ -231,15 +245,9 @@ func handleGetObjectError(w http.ResponseWriter, err error, requestID string, lo
 }
 
 func setGetObjectHeaders(w http.ResponseWriter, output *s3.GetObjectOutput) {
-	setDefaultObjectHeaders(w, output)
-	// Is this a bug or on purpose?
-	// if output.ServerSideEncryption != "" {
-	// 	w.Header().Set("x-amz-server-side-encryption-context", string(output.ServerSideEncryption))
-	// }
-}
-
-func setDefaultObjectHeaders(w http.ResponseWriter, output *s3.GetObjectOutput) {
-	setHeaderIfNonEmpty(w.Header(), "ETag", strings.Trim(*output.ETag, "\""))
+	if output.ETag != nil {
+		w.Header().Set("ETag", strings.Trim(*output.ETag, "\""))
+	}
 	setHeaderIfNonEmpty(w.Header(), "x-amz-expiration", output.Expiration)
 	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-crc32", output.ChecksumCRC32)
 	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-crc32c", output.ChecksumCRC32C)
@@ -248,8 +256,9 @@ func setDefaultObjectHeaders(w http.ResponseWriter, output *s3.GetObjectOutput) 
 	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-customer-algorithm", output.SSECustomerAlgorithm)
 	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-customer-key-MD5", output.SSECustomerKeyMD5)
 	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-aws-kms-key-id", output.SSEKMSKeyId)
-	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-context", output.SSEKMSEncryptionContext)
-	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption", output.ServerSideEncryption)
+	if output.ServerSideEncryption != "" {
+		w.Header().Set("x-amz-server-side-encryption", string(output.ServerSideEncryption))
+	}
 }
 
 func parseErrorCode(err error) int {

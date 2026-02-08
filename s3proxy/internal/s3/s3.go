@@ -4,7 +4,6 @@ Copyright (c) Intrinsec 2024
 
 SPDX-License-Identifier: AGPL-3.0-only
 */
-
 /*
 Package s3 implements a very thin wrapper around the AWS S3 client.
 It only exists to enable stubbing of the AWS S3 client in tests.

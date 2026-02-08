@@ -4,7 +4,6 @@ Copyright (c) Intrinsec 2024
 
 SPDX-License-Identifier: AGPL-3.0-only
 */
-
 /*
 Package router implements the main interception logic of s3proxy.
 It decides which packages to forward and which to intercept.
