@@ -28,6 +28,7 @@ import (
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	configs3proxy "github.com/intrinsec/s3proxy/internal/config"
+	logger "github.com/sirupsen/logrus"
 )
 
 // Client is a wrapper around the AWS S3 client.
@@ -52,7 +53,7 @@ func (m *ErrorRawResponse) Error() string {
 }
 
 // Middleware to capture the raw response in the Send phase by cloning and storing the response body
-func addCaptureRawResponseDeserializeMiddleware() func(*middleware.Stack) error {
+func addCaptureRawResponseDeserializeMiddleware(log *logger.Logger) func(*middleware.Stack) error {
 	return func(stack *middleware.Stack) error {
 		return stack.Deserialize.Add(middleware.DeserializeMiddlewareFunc("CaptureRawResponseDeserialize", func(
 			ctx context.Context, in middleware.DeserializeInput, next middleware.DeserializeHandler,
@@ -136,7 +137,7 @@ func addCaptureRawResponseInitializeMiddleware() func(*middleware.Stack) error {
 }
 
 // NewClient creates a new AWS S3 client.
-func NewClient(region string) (*Client, error) {
+func NewClient(region string, log *logger.Logger) (*Client, error) {
 	// Use context.Background here because this context will not influence the later operations of the client.
 	// The context given here is used for http requests that are made during client construction.
 	// Client construction happens once during proxy setup.
@@ -158,7 +159,7 @@ func NewClient(region string) (*Client, error) {
 		o.BaseEndpoint = aws.String("https://" + host)
 		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
-		o.APIOptions = append(o.APIOptions, addCaptureRawResponseDeserializeMiddleware())
+		o.APIOptions = append(o.APIOptions, addCaptureRawResponseDeserializeMiddleware(log))
 		o.APIOptions = append(o.APIOptions, addCaptureRawResponseInitializeMiddleware())
 	})
 
@@ -206,6 +207,7 @@ func (c Client) PutObject(ctx context.Context, bucket, key, tags, contentType, o
 		contentType = "binary/octet-stream"
 	}
 
+	// #nosec G401
 	contentMD5 := md5.Sum(body)
 	encodedContentMD5 := base64.StdEncoding.EncodeToString(contentMD5[:])
 

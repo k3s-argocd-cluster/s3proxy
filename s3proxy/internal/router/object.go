@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -53,6 +54,7 @@ type object struct {
 	sseCustomerAlgorithm      string
 	sseCustomerKey            string
 	sseCustomerKeyMD5         string
+	versionID                 string
 	log                       *logger.Logger
 }
 
@@ -73,57 +75,17 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 
 	o.log.WithField("requestID", requestID).WithField("key", o.key).WithField("bucket", o.bucket).Debug("getObject")
 
-	versionID, ok := o.query["versionId"]
-	if !ok {
-		versionID = []string{""}
-	}
-
-	output, err := o.client.GetObject(context.WithoutCancel(r.Context()), o.bucket, o.key, versionID[0], o.sseCustomerAlgorithm, o.sseCustomerKey, o.sseCustomerKeyMD5)
+	output, err := o.client.GetObject(context.WithoutCancel(r.Context()), o.bucket, o.key, o.versionID, o.sseCustomerAlgorithm, o.sseCustomerKey, o.sseCustomerKeyMD5)
 
 	if err != nil {
 		// log with Info as it might be expected behavior (e.g. object not found).
 		o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject sending request to S3")
 
-		var httpResponseErr *awshttp.ResponseError
-		if errors.As(err, &httpResponseErr) {
-			// We want to forward error codes from the s3 API to clients as much as possible.
-			code := httpResponseErr.HTTPStatusCode()
-			o.log.WithField("requestID", requestID).WithField("code", code).WithField("httpResponseErr", httpResponseErr).Error("GetObject sending request to S3 (awshttp.ResponseError)")
-			if code != 0 {
-				var s3internalErr *s3internal.ErrorRawResponse
-				if errors.As(err, &s3internalErr) {
-					http.Error(w, s3internalErr.Error(), code)
-				} else {
-					http.Error(w, err.Error(), code)
-				}
-				for key := range httpResponseErr.ResponseError.Response.Response.Header {
-					w.Header().Set(key, httpResponseErr.ResponseError.Response.Response.Header.Get(key))
-				}
-				return
-			}
-
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
+		handleGetObjectError(w, err, requestID, o.log)
 		return
 	}
 
-	if output.ETag != nil {
-		w.Header().Set("ETag", strings.Trim(*output.ETag, "\""))
-	}
-	if output.Expiration != nil {
-		w.Header().Set("x-amz-expiration", *output.Expiration)
-	}
-	if output.ServerSideEncryption != "" {
-		w.Header().Set("x-amz-server-side-encryption-context", string(output.ServerSideEncryption))
-	}
-	setHeaderIfNonEmpty(w.Header(), "x-amz-expiration", output.Expiration)
-	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-crc32", output.ChecksumCRC32)
-	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-crc32c", output.ChecksumCRC32C)
-	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-sha1", output.ChecksumSHA1)
-	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-sha256", output.ChecksumSHA256)
-	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-customer-algorithm", output.SSECustomerAlgorithm)
-	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-customer-key-MD5", output.SSECustomerKeyMD5)
-	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-aws-kms-key-id", output.SSEKMSKeyId)
+	setGetObjectHeaders(w, output)
 
 	var body []byte
 	if output.ContentLength == nil {
@@ -146,7 +108,6 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-	}
 
 	plaintext := body
 	rawEncryptedDEK, ok := output.Metadata[dekTag]
@@ -154,8 +115,8 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		encryptedDEK, err := hex.DecodeString(rawEncryptedDEK)
 		if err != nil {
-			o.log.Error("GetObject decoding DEK", "error", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject decoding DEK")
+			http.Error(w, "failed to decode encryption key", http.StatusInternalServerError)
 			return
 		}
 
@@ -168,7 +129,7 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject decrypting response")
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, "failed to decrypt object", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -201,7 +162,6 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 // put is a http.HandlerFunc that implements the PUT method for objects.
 func (o object) put(w http.ResponseWriter, r *http.Request) {
 	requestID := uuid.New().String()
-
 	o.log.WithField("requestID", requestID).WithField("key", o.key).WithField("bucket", o.bucket).Debug("putObject")
 
 	ciphertext, encryptedDEK, err := crypto.Encrypt(o.data, o.kek)
@@ -221,31 +181,65 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 	output, err := o.client.PutObject(context.WithoutCancel(r.Context()), o.bucket, o.key, o.tags, o.contentType, o.objectLockLegalHoldStatus, o.objectLockMode, o.sseCustomerAlgorithm, o.sseCustomerKey, o.sseCustomerKeyMD5, o.objectLockRetainUntilDate, o.metadata, ciphertext)
 	if err != nil {
 		o.log.WithField("requestID", requestID).WithField("error", err).Error("PutObject sending request to S3")
-
-		// We want to forward error codes from the s3 API to clients whenever possible.
 		code := parseErrorCode(err)
 		if code != 0 {
 			http.Error(w, err.Error(), code)
 			return
 		}
-
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	cipherTextLen := len(ciphertext)
 	ciphertext = nil
 	if cipherTextLen > freeOSMemoryThreshold {
 		debug.FreeOSMemory()
 	}
-	ssd_enc := string(output.ServerSideEncryption)
-	if ssd_enc != "" { // It can be empty for empty files, at least on Hetzner storage
-		w.Header().Set("x-amz-server-side-encryption", ssd_enc)
-	}
-	if output.ETag != nil {
-		w.Header().Set("ETag", strings.Trim(*output.ETag, "\""))
-	}
+	setPutObjectHeaders(w, output)
 
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(nil); err != nil {
+		o.log.WithField("requestID", requestID).WithField("error", err).Error("PutObject sending response")
+	}
+}
+
+func setPutObjectHeaders(w http.ResponseWriter, output *s3.PutObjectOutput) {
 	setHeaderIfNonEmpty(w.Header(), "x-amz-version-id", output.VersionId)
+	setDefaultObjectHeaders(w, output)
+}
+
+func handleGetObjectError(w http.ResponseWriter, err error, requestID string, log *logger.Logger) {
+	log.WithField("requestID", requestID).WithField("error", err).Error("GetObject sending request to S3")
+	var httpResponseErr *awshttp.ResponseError
+	if errors.As(err, &httpResponseErr) {
+		code := httpResponseErr.HTTPStatusCode()
+		log.WithField("requestID", requestID).WithField("code", code).WithField("httpResponseErr", httpResponseErr).Error("GetObject sending request to S3 (awshttp.ResponseError)")
+		if code != 0 {
+			var s3internalErr *s3internal.ErrorRawResponse
+			if errors.As(err, &s3internalErr) {
+				http.Error(w, s3internalErr.Error(), code)
+			} else {
+				http.Error(w, err.Error(), code)
+			}
+			for key := range httpResponseErr.Response.Header {
+				w.Header().Set(key, httpResponseErr.Response.Header.Get(key))
+			}
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func setGetObjectHeaders(w http.ResponseWriter, output *s3.GetObjectOutput) {
+	setDefaultObjectHeaders(w, output)
+	// Is this a bug or on purpose?
+	// if output.ServerSideEncryption != "" {
+	// 	w.Header().Set("x-amz-server-side-encryption-context", string(output.ServerSideEncryption))
+	// }
+}
+
+func setDefaultObjectHeaders(w http.ResponseWriter, output *s3.GetObjectOutput) {
+	setHeaderIfNonEmpty(w.Header(), "ETag", strings.Trim(*output.ETag, "\""))
 	setHeaderIfNonEmpty(w.Header(), "x-amz-expiration", output.Expiration)
 	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-crc32", output.ChecksumCRC32)
 	setHeaderIfNonEmpty(w.Header(), "x-amz-checksum-crc32c", output.ChecksumCRC32C)
@@ -255,18 +249,17 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-customer-key-MD5", output.SSECustomerKeyMD5)
 	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-aws-kms-key-id", output.SSEKMSKeyId)
 	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption-context", output.SSEKMSEncryptionContext)
-
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write(nil); err != nil {
-		o.log.WithField("requestID", requestID).WithField("error", err).Error("PutObject sending response")
-	}
+	setHeaderIfNonEmpty(w.Header(), "x-amz-server-side-encryption", output.ServerSideEncryption)
 }
 
 func parseErrorCode(err error) int {
 	regex := regexp.MustCompile(`https response error StatusCode: (\d+)`)
 	matches := regex.FindStringSubmatch(err.Error())
 	if len(matches) > 1 {
-		code, _ := strconv.Atoi(matches[1])
+		code, err := strconv.Atoi(matches[1])
+		if err != nil {
+			return 0
+		}
 		return code
 	}
 
