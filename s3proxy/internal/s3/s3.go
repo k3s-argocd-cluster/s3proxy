@@ -220,7 +220,6 @@ func (c Client) PutObject(ctx context.Context, bucket, key, tags, contentType, o
 		Bucket:                    &bucket,
 		Key:                       &key,
 		Body:                      bytes.NewReader(body),
-		Tagging:                   &tags,
 		Metadata:                  metadata,
 		ContentMD5:                &encodedContentMD5,
 		ContentType:               &contentType,
