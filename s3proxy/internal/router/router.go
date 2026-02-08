@@ -78,7 +78,7 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	client, err := s3.NewClient(r.region, r.log)
+	client, err := s3.NewClient(r.region)
 	if err != nil {
 		r.log.WithError(err).Error("failed to create S3 client")
 		http.Error(w, "internal server error", http.StatusInternalServerError)

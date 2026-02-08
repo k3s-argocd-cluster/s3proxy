@@ -27,7 +27,6 @@ import (
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	configs3proxy "github.com/intrinsec/s3proxy/internal/config"
-	logger "github.com/sirupsen/logrus"
 )
 
 // Client is a wrapper around the AWS S3 client.
@@ -52,7 +51,7 @@ func (m *ErrorRawResponse) Error() string {
 }
 
 // Middleware to capture the raw response in the Send phase by cloning and storing the response body
-func addCaptureRawResponseDeserializeMiddleware(log *logger.Logger) func(*middleware.Stack) error {
+func addCaptureRawResponseDeserializeMiddleware() func(*middleware.Stack) error {
 	return func(stack *middleware.Stack) error {
 		return stack.Deserialize.Add(middleware.DeserializeMiddlewareFunc("CaptureRawResponseDeserialize", func(
 			ctx context.Context, in middleware.DeserializeInput, next middleware.DeserializeHandler,
@@ -63,42 +62,9 @@ func addCaptureRawResponseDeserializeMiddleware(log *logger.Logger) func(*middle
 			if resp, ok := out.RawResponse.(*smithyhttp.Response); ok {
 				// It is better not to clone the response body for successful responses
 				// because it can consume a lot of memory for large responses and we can not free it ASAP
-				if resp.StatusCode >= 400 {
-					var bodyBytes []byte
-
-					if cl := resp.Header.Get("Content-Length"); cl != "" {
-						if n64, perr := strconv.ParseInt(cl, 10, 64); perr == nil && n64 >= 0 {
-							n := int(n64)
-							bodyBytes = make([]byte, n)
-							// Preallocate the buffer from Content-Length and fill it with io.ReadFull.
-							// This avoids the incremental growth and extra copies that io.ReadAll incurs
-							// when the final size is unknown, which can blow up RAM on large payloads.
-							// If Content-Length is missing or bogus we fall back to ReadAll below.
-							if _, rerr := io.ReadFull(resp.Body, bodyBytes); rerr != nil {
-								wrap := fmt.Errorf("capture raw response (prealloc) failed: %w", rerr)
-								if err != nil {
-									return out, metadata, fmt.Errorf("%v; original deserialize error: %w", wrap, err)
-								}
-								return out, metadata, wrap
-							}
-						}
-					}
-
-					if bodyBytes == nil {
-						// Fallback: previous behavior (unbounded ReadAll).
-						// NOTE: this may allocate for large bodies; we only use it when CL is missing/invalid.
-						b, rerr := io.ReadAll(resp.Body)
-						if rerr != nil {
-							wrap := fmt.Errorf("capture raw response (ReadAll) failed: %w", rerr)
-							if err != nil {
-								return out, metadata, fmt.Errorf("%v; original deserialize error: %w", wrap, err)
-							}
-							return out, metadata, wrap
-						}
-						bodyBytes = b
-					}
-					// Restore the original body for further processing
-					resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				shouldReturn, cperr := copyBody(resp, err)
+				if shouldReturn {
+					return out, metadata, cperr
 				}
 			} else {
 				metadata.Set(RawResponseKey{}, "")
@@ -106,6 +72,46 @@ func addCaptureRawResponseDeserializeMiddleware(log *logger.Logger) func(*middle
 			return out, metadata, err
 		}), middleware.After)
 	}
+}
+
+func copyBody(resp *smithyhttp.Response, err error) (bool, error) {
+	var bodyBytes []byte
+
+	if cl := resp.Header.Get("Content-Length"); cl != "" {
+		if n64, perr := strconv.ParseInt(cl, 10, 64); perr == nil && n64 >= 0 {
+			n := int(n64)
+			bodyBytes = make([]byte, n)
+			// Preallocate the buffer from Content-Length and fill it with io.ReadFull.
+			// This avoids the incremental growth and extra copies that io.ReadAll incurs
+			// when the final size is unknown, which can blow up RAM on large payloads.
+			// If Content-Length is missing or bogus we fall back to ReadAll below.
+			if _, rerr := io.ReadFull(resp.Body, bodyBytes); rerr != nil {
+				wrap := fmt.Errorf("capture raw response (prealloc) failed: %w", rerr)
+				if err != nil {
+					return true, fmt.Errorf("%v; original deserialize error: %w", wrap, err)
+				}
+				return true, wrap
+			}
+		}
+	}
+
+	if bodyBytes == nil {
+		// Fallback: previous behavior (unbounded ReadAll).
+		// NOTE: this may allocate for large bodies; we only use it when CL is missing/invalid.
+		b, rerr := io.ReadAll(resp.Body)
+		if rerr != nil {
+			wrap := fmt.Errorf("capture raw response (ReadAll) failed: %w", rerr)
+			if err != nil {
+				return true, fmt.Errorf("%v; original deserialize error: %w", wrap, err)
+			}
+			return true, wrap
+		}
+		bodyBytes = b
+	}
+
+	// Restore the original body for further processing
+	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	return false, nil
 }
 
 func addCaptureRawResponseInitializeMiddleware() func(*middleware.Stack) error {
@@ -136,7 +142,7 @@ func addCaptureRawResponseInitializeMiddleware() func(*middleware.Stack) error {
 }
 
 // NewClient creates a new AWS S3 client.
-func NewClient(region string, log *logger.Logger) (*Client, error) {
+func NewClient(region string) (*Client, error) {
 	// Use context.Background here because this context will not influence the later operations of the client.
 	// The context given here is used for http requests that are made during client construction.
 	// Client construction happens once during proxy setup.
@@ -158,7 +164,7 @@ func NewClient(region string, log *logger.Logger) (*Client, error) {
 		o.BaseEndpoint = aws.String("https://" + host)
 		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
-		o.APIOptions = append(o.APIOptions, addCaptureRawResponseDeserializeMiddleware(log))
+		o.APIOptions = append(o.APIOptions, addCaptureRawResponseDeserializeMiddleware())
 		o.APIOptions = append(o.APIOptions, addCaptureRawResponseInitializeMiddleware())
 	})
 

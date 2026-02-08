@@ -25,7 +25,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	"github.com/intrinsec/s3proxy/internal/config"
-	"github.com/intrinsec/s3proxy/internal/crypto"
+	crypto "github.com/intrinsec/s3proxy/internal/crypto"
 	s3internal "github.com/intrinsec/s3proxy/internal/s3"
 	logger "github.com/sirupsen/logrus"
 )
@@ -123,7 +123,7 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 		plaintext, err = crypto.Decrypt(body, encryptedDEK, o.kek)
 		// We do not need to keep body anymore. Because it can be gigabytes in size - free it ASAP
 		bodyLen := len(body)
-		body = nil
+		body = nil //nolint:ineffassign
 		if bodyLen >= freeOSMemoryThreshold {
 			debug.FreeOSMemory()
 		}
@@ -138,7 +138,7 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 	select {
 	case <-r.Context().Done():
 		o.log.WithField("requestID", requestID).Info("Request was canceled by client")
-		plaintext = nil
+		plaintext = nil //nolint:ineffassign
 		if plaintextLen >= freeOSMemoryThreshold {
 			debug.FreeOSMemory()
 		}
@@ -153,7 +153,7 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	plaintext = nil
+	plaintext = nil //nolint:ineffassign
 	if plaintextLen >= freeOSMemoryThreshold {
 		debug.FreeOSMemory()
 	}
@@ -172,7 +172,7 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 	}
 	// We do not need to keep data anymore. Because it can be gigabytes in size - free it ASAP
 	dataLen := len(o.data)
-	o.data = nil
+	o.data = nil //nolint:ineffassign
 	if dataLen >= freeOSMemoryThreshold {
 		debug.FreeOSMemory()
 	}
@@ -191,7 +191,7 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cipherTextLen := len(ciphertext)
-	ciphertext = nil
+	ciphertext = nil //nolint:ineffassign
 	if cipherTextLen > freeOSMemoryThreshold {
 		debug.FreeOSMemory()
 	}
