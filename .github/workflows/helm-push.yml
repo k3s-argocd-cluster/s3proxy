@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  CHART_REPO: intrinsec/s3proxy/charts
+  CHART_REPO: k3s-argocd-cluster/s3proxy/charts
 
 jobs:
   build:
