@@ -50,10 +50,11 @@ app.kubernetes.io/name: {{ include "s3proxy.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
-{{- define "isCertConfigValid" -}}
-{{- .Values.cert.enable -}}
-{{- end -}}
-
+{{- define "isCertConfigValid" }}
+{{- if .Values.cert.enable }}
+  {{- print "true" }}
+{{- end }}
+{{- end }}
 {{/*
 Check if a specific value is provided; if it exists, return that value.
 Parameters:
