@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/k3s-argocd-cluster/s3proxy
-  pullPolicy: Always
+  pullPolicy: IfNotPresent
   # tag: latest
 
 imagePullSecrets: []
@@ -15,7 +15,8 @@ fullnameOverride: ""
 #  actually is written into the metadata to that object, not an explicit tag.
 # Can add "--no-tls" if you don't want TLS
 #  By default, listenning TLS with files /etc/s3proxy/certs/s3proxy.crt & /etc/s3proxy/certs/s3proxy.key
-args: ["--level=-4"]
+#  When disabling TLS, make sure to revisit liveness and readiness probes (and change from HTTPS to HTTP)
+args: ["--level=1"]
 
 cert: # From CertManager CRD
   enable: false
