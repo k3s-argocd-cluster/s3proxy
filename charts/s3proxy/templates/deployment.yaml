@@ -41,17 +41,17 @@ spec:
           - name: AWS_ACCESS_KEY_ID
             valueFrom:
               secretKeyRef:
-                name: s3proxy
+                name: {{ .Values.config.existentSecret | default "s3proxy" }}
                 key: accesskey
           - name: AWS_SECRET_ACCESS_KEY
             valueFrom:
               secretKeyRef:
-                name: s3proxy
+                name: {{ .Values.config.existentSecret | default "s3proxy" }}
                 key: secretkey
           - name: S3PROXY_ENCRYPT_KEY
             valueFrom:
               secretKeyRef:
-                name: s3proxy
+                name: {{ .Values.config.existentSecret | default "s3proxy" }}
                 key: encryptkey
           - name: S3PROXY_HOST
             value: {{ .Values.config.host | quote }}
@@ -67,8 +67,10 @@ spec:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:
             {{- toYaml .Values.readinessProbe | nindent 12 }}
+          {{- if (.Values.resources | not | empty) }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- end }}
           {{- if or (include "isCertConfigValid" .) (.Values.extraVolumeMounts | not | empty) }}
           volumeMounts:
           {{- if (include "isCertConfigValid" .) }}

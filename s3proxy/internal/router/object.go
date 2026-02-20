@@ -14,9 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -180,12 +178,16 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 
 	output, err := o.client.PutObject(context.WithoutCancel(r.Context()), o.bucket, o.key, o.tags, o.contentType, o.objectLockLegalHoldStatus, o.objectLockMode, o.sseCustomerAlgorithm, o.sseCustomerKey, o.sseCustomerKeyMD5, o.objectLockRetainUntilDate, o.metadata, ciphertext)
 	if err != nil {
-		o.log.WithField("requestID", requestID).WithField("error", err).Error("PutObject sending request to S3")
-		code := parseErrorCode(err)
-		if code != 0 {
+		var httpResponseErr *awshttp.ResponseError
+		if errors.As(err, &httpResponseErr) {
+			code := httpResponseErr.HTTPStatusCode()
+			o.log.WithField("requestID", requestID).WithField("code", code).WithField("httpResponseErr", httpResponseErr).Error("PutObject sending request to S3")
+
 			http.Error(w, err.Error(), code)
 			return
 		}
+
+		o.log.WithField("requestID", requestID).WithField("error", err).Error("PutObject sending request to S3")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -259,20 +261,6 @@ func setGetObjectHeaders(w http.ResponseWriter, output *s3.GetObjectOutput) {
 	if output.ServerSideEncryption != "" {
 		w.Header().Set("x-amz-server-side-encryption", string(output.ServerSideEncryption))
 	}
-}
-
-func parseErrorCode(err error) int {
-	regex := regexp.MustCompile(`https response error StatusCode: (\d+)`)
-	matches := regex.FindStringSubmatch(err.Error())
-	if len(matches) > 1 {
-		code, err := strconv.Atoi(matches[1])
-		if err != nil {
-			return 0
-		}
-		return code
-	}
-
-	return 0
 }
 
 type s3Client interface {

@@ -1,6 +1,15 @@
-# S3Proxy by Intrinsec (forked from [constellation](https://github.com/edgelesssys/constellation))
+# S3Proxy for k3s-argocd-cluster (forked from [Intrinsec](https://github.com/Intrinsec/s3proxy))
 
 **S3Proxy** is a Docker image that enables seamless encryption (AES-256-GCM) for all communications with an S3 provider, adding an extra layer of security. The proxy intercepts PUT and GET requests, encrypting data before sending it to S3 and decrypting it upon retrieval.
+
+## Fork details
+The origin has a severe [security issue](https://github.com/Intrinsec/s3proxy/issues/21) and has multiple PRs outstanding and looks like it wouldn't be maintained any more.
+In order to unblock my own (home) cluster from backing up Longhorn volumes into BackBlaze B2 i.e. enable me to make use of s3proxy overall, I have decided
+to cleanup some code, merge outstanding PRs and add BackBlaze B2 support.
+
+PRs included:
+(Reduce RAM usage)[https://github.com/Intrinsec/s3proxy/pull/28], from (vetal4444)[https://github.com/vetal4444]
+(Fix security issue & code cleanup)[https://github.com/Intrinsec/s3proxy/pull/32], from (ynsta)[https://github.com/ynsta]
 
 ## Features
 

@@ -49,6 +49,7 @@ type Router struct {
 	// s3proxy does not implement those yet.
 	// Setting forwardMultipartReqs to true will forward those requests to the S3 API, otherwise we block them (secure defaults).
 	forwardMultipartReqs bool
+	tagging              bool
 	log                  *logger.Logger
 }
 
@@ -59,13 +60,13 @@ func generateKEKFromString(input string) [32]byte {
 }
 
 // New creates a new Router.
-func New(region string, forwardMultipartReqs bool, log *logger.Logger) (Router, error) {
+func New(region string, forwardMultipartReqs bool, tagging bool, log *logger.Logger) (Router, error) {
 	result, err := config.GetEncryptKey()
 	if err != nil {
 		return Router{}, err
 	}
 	kekArray := generateKEKFromString(result)
-	return Router{region: region, kek: kekArray, forwardMultipartReqs: forwardMultipartReqs, log: log}, nil
+	return Router{region: region, kek: kekArray, forwardMultipartReqs: forwardMultipartReqs, tagging: tagging, log: log}, nil
 }
 
 // Serve implements the routing logic for the s3 proxy.
@@ -78,7 +79,7 @@ func (r Router) Serve(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	client, err := s3.NewClient(r.region)
+	client, err := s3.NewClient(r.region, r.tagging)
 	if err != nil {
 		r.log.WithError(err).Error("failed to create S3 client")
 		http.Error(w, "internal server error", http.StatusInternalServerError)

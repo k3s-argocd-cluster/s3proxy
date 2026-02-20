@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/intrinsec/s3proxy
+  repository: ghcr.io/k3s-argocd-cluster/s3proxy
   pullPolicy: Always
   # tag: latest
 
@@ -9,8 +9,12 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# Can add "--no-tagging" if you don't want to use x-amz-tagging header
+#  This enables the s3proxy to also be used with i.e. BackBlaze S3 bucket store
+#  Please note this should not break any functionality. Although there is an DekTag attribute, its value
+#  actually is written into the metadata to that object, not an explicit tag.
 # Can add "--no-tls" if you don't want TLS
-# By default, listenning TLS with files /etc/s3proxy/certs/s3proxy.crt & /etc/s3proxy/certs/s3proxy.key
+#  By default, listenning TLS with files /etc/s3proxy/certs/s3proxy.crt & /etc/s3proxy/certs/s3proxy.key
 args: ["--level=-4"]
 
 cert: # From CertManager CRD
@@ -25,6 +29,7 @@ config:
   # accessKey: CHANGEME
   # secretKey: CHANGEME
   # encryptKey: CHANGEME
+  # existentSecret: s3proxy-secret
 valsSecret: {}
 #   accessKey: ref+vault://s3proxy/secrets/access-key
 #   secretKey: ref+vault://s3proxy/secrets/secret-key

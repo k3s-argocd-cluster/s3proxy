@@ -9,7 +9,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # TARGET_PLATFORMS: 'linux/amd64'
   TARGET_PLATFORMS: 'linux/amd64,linux/arm64'
 
 jobs:
@@ -25,13 +24,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set TARGET_PLATFORMS based on branch (arm only on main)
-        id: set-platforms
-        run: |
-          if [ "${{ github.ref == format('refs/heads/{0}', 'main') }}" != "true" ]; then
-            echo "TARGET_PLATFORMS=linux/amd64" >> $GITHUB_ENV
-          fi
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -73,8 +65,7 @@ jobs:
         with:
           context: .
           platforms: ${{ env.TARGET_PLATFORMS }}
-          push: true
-          # push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

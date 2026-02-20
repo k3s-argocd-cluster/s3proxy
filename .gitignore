@@ -1,4 +1,6 @@
 go.work.sum
+s3proxy/cmd/main
+bin/golangci-lint
 
 # IDEs and editors
 .idea

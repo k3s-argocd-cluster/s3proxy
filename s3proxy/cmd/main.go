@@ -84,7 +84,7 @@ func main() {
 func runServer(flags cmdFlags, log *logger.Logger) error {
 	log.WithField("ip", flags.ip).WithField("port", defaultPort).WithField("region", flags.region).Info("listening")
 
-	routerInstance, err := router.New(flags.region, flags.forwardMultipartReqs, log)
+	routerInstance, err := router.New(flags.region, flags.forwardMultipartReqs, !flags.noTagging, log)
 	if err != nil {
 		return fmt.Errorf("creating router: %w", err)
 	}
@@ -138,6 +138,7 @@ func parseFlags() (cmdFlags, error) {
 	kmsEndpoint := flag.String("kms", "key-service.kube-system:9000", "endpoint of the KMS service to get key encryption keys from")
 	forwardMultipartReqs := flag.Bool("allow-multipart", false, "forward multipart requests to the target bucket; beware: this may store unencrypted data on AWS. See the documentation for more information")
 	level := flag.Int("level", defaultLogLevel, "log level")
+	noTagging := flag.Bool("no-tagging", false, "disable S3 object tagging (i.e. x-amz-tagging header), may be helpful for backends such as BackBlaze B2")
 
 	flag.Parse()
 
@@ -160,6 +161,7 @@ func parseFlags() (cmdFlags, error) {
 		kmsEndpoint:          *kmsEndpoint,
 		forwardMultipartReqs: *forwardMultipartReqs,
 		logLevel:             *level,
+		noTagging:            *noTagging,
 	}, nil
 }
 
@@ -170,6 +172,7 @@ type cmdFlags struct {
 	certLocation         string
 	kmsEndpoint          string
 	forwardMultipartReqs bool
+	noTagging            bool
 	// TODO(derpsteb): enable once we are on go 1.21.
 	// logLevel slog.Level
 	logLevel int

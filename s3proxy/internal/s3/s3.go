@@ -33,6 +33,7 @@ import (
 type Client struct {
 	s3client *s3.Client
 	s3config *aws.Config
+	tagging  bool
 }
 
 type RawResponseKey struct{}
@@ -142,7 +143,7 @@ func addCaptureRawResponseInitializeMiddleware() func(*middleware.Stack) error {
 }
 
 // NewClient creates a new AWS S3 client.
-func NewClient(region string) (*Client, error) {
+func NewClient(region string, tagging bool) (*Client, error) {
 	// Use context.Background here because this context will not influence the later operations of the client.
 	// The context given here is used for http requests that are made during client construction.
 	// Client construction happens once during proxy setup.
@@ -168,7 +169,7 @@ func NewClient(region string) (*Client, error) {
 		o.APIOptions = append(o.APIOptions, addCaptureRawResponseInitializeMiddleware())
 	})
 
-	return &Client{s3client: client, s3config: &clientCfg}, nil
+	return &Client{s3client: client, s3config: &clientCfg, tagging: tagging}, nil
 }
 
 func (c Client) GetConfig() *aws.Config {
@@ -233,6 +234,9 @@ func (c Client) PutObject(ctx context.Context, bucket, key, tags, contentType, o
 	}
 	if sseCustomerKeyMD5 != "" {
 		putObjectInput.SSECustomerKeyMD5 = &sseCustomerKeyMD5
+	}
+	if c.tagging {
+		putObjectInput.Tagging = &tags
 	}
 
 	// It is not allowed to only set one of these two properties.
