@@ -8,8 +8,8 @@ In order to unblock my own (home) cluster from backing up Longhorn volumes into 
 to cleanup some code, merge outstanding PRs and add BackBlaze B2 support.
 
 PRs included:
-(Reduce RAM usage)[https://github.com/Intrinsec/s3proxy/pull/28], from (vetal4444)[https://github.com/vetal4444]
-(Fix security issue & code cleanup)[https://github.com/Intrinsec/s3proxy/pull/32], from (ynsta)[https://github.com/ynsta]
+- [Reduce RAM usage](https://github.com/Intrinsec/s3proxy/pull/28), from [vetal4444](https://github.com/vetal4444)
+- [Fix security issue & code cleanup](https://github.com/Intrinsec/s3proxy/pull/32), from [ynsta](https://github.com/ynsta)
 
 ## Features
 
