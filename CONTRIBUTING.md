@@ -6,7 +6,7 @@ To set up your development environment:
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/intrinsec/s3proxy.git
+    git clone https://github.com/k3s-argocd-cluster/s3proxy.git
     cd s3proxy
     ```
 2.  **Run a Docker container with Go:**
@@ -27,7 +27,7 @@ To set up your development environment:
 ### Example
 
 ```bash
-git clone # or gh repo clone Intrinsec/s3proxy
+git clone # or gh repo clone k3s-argocd-cluster/s3proxy
 cd s3proxy
 docker run --rm -p 4433:4433 -v $PWD:/app -it golang:1.25.3 bash
 # In VSCode, use "Attach to Running Container..." option => select golang container => open /app folder

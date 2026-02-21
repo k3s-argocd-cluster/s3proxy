@@ -26,7 +26,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
-	configs3proxy "github.com/intrinsec/s3proxy/internal/config"
+	configs3proxy "github.com/k3s-argocd-cluster/s3proxy/internal/config"
 )
 
 // Client is a wrapper around the AWS S3 client.

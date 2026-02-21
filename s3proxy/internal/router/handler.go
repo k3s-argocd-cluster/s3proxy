@@ -16,8 +16,9 @@ import (
 	"time"
 
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
-	"github.com/intrinsec/s3proxy/internal/config"
-	"github.com/intrinsec/s3proxy/internal/s3"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/cache"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/config"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/s3"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -67,9 +68,12 @@ func handleGetObject(client *s3.Client, key string, bucket string, log *logger.L
 	}
 }
 
-func handlePutObject(client *s3.Client, key string, bucket string, log *logger.Logger) http.HandlerFunc {
+func handlePutObject(client *s3.Client, c cache.Cache, key string, bucket string, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Debug("intercepting")
+
+		c.RemoveFromCache(req.URL.Path)
+
 		var (
 			body []byte
 			err  error
@@ -163,60 +167,90 @@ func handlePutObject(client *s3.Client, key string, bucket string, log *logger.L
 	}
 }
 
-func handleForwards(client *s3.Client, log *logger.Logger) http.HandlerFunc {
+func handleForwards(client *s3.Client, c cache.Cache, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Debug("forwarding")
-
-		newReq, err := repackage(req)
+		wantsToCache, cachePath, cached, err := c.GetFromCache(req)
 		if err != nil {
-			log.WithField("error", err).Error("failed to repackage request")
+			log.WithField("error", err).Error("failed to process from cache")
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
-		cfg := client.GetConfig()
+		if cached == nil {
+			log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Debug("forwarding")
 
-		creds, err := cfg.Credentials.Retrieve(context.TODO())
-		if err != nil {
-			log.WithField("error", err).Error("unable to retrieve aws creds")
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			newReq, err := repackage(req)
+			if err != nil {
+				log.WithField("error", err).Error("failed to repackage request")
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+
+			cfg := client.GetConfig()
+
+			creds, err := cfg.Credentials.Retrieve(context.TODO())
+			if err != nil {
+				log.WithField("error", err).Error("unable to retrieve aws creds")
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+
+			signer := v4.NewSigner()
+
+			err = signer.SignHTTP(context.TODO(), creds, newReq, newReq.Header.Get("X-Amz-Content-Sha256"), "s3", cfg.Region, time.Now())
+			if err != nil {
+				log.WithField("error", err).Error("failed to sign request")
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+
+			httpClient := http.DefaultClient
+			resp, err := httpClient.Do(newReq)
+			if err != nil {
+				log.WithField("error", err).Error("do request")
+				http.Error(w, fmt.Sprintf("do request: %s", err.Error()), http.StatusInternalServerError)
+				return
+			}
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+
+			if err != nil {
+				log.WithField("error", err).Error("failed to read response body")
+				http.Error(w, "failed to read response", http.StatusInternalServerError)
+				return
+			}
+
+			header := http.Header{}
+			for key := range resp.Header {
+				header.Add(key, resp.Header.Get(key))
+			}
+
+			element := cache.CacheElement{
+				Header:     header,
+				Body:       body,
+				StatusCode: resp.StatusCode,
+			}
+
+			if wantsToCache {
+				c.Store(cache.Action(req.Method), *cachePath, &element)
+			}
+
+			cached = &element
+		} else {
+			log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Debug("from cache")
+		}
+
+		for key := range cached.Header {
+			w.Header().Set(key, cached.Header.Get(key))
+		}
+
+		w.WriteHeader(cached.StatusCode)
+		if len(cached.Body) == 0 {
 			return
 		}
 
-		signer := v4.NewSigner()
-
-		err = signer.SignHTTP(context.TODO(), creds, newReq, newReq.Header.Get("X-Amz-Content-Sha256"), "s3", cfg.Region, time.Now())
-		if err != nil {
-			log.WithField("error", err).Error("failed to sign request")
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		httpClient := http.DefaultClient
-		resp, err := httpClient.Do(newReq)
-		if err != nil {
-			log.WithField("error", err).Error("do request")
-			http.Error(w, fmt.Sprintf("do request: %s", err.Error()), http.StatusInternalServerError)
-			return
-		}
-		defer resp.Body.Close()
-
-		for key := range resp.Header {
-			w.Header().Set(key, resp.Header.Get(key))
-		}
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			log.WithField("error", err).Error("failed to read response body")
-			http.Error(w, "failed to read response", http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(resp.StatusCode)
-		if len(body) == 0 {
-			return
-		}
-
-		if _, err := w.Write(body); err != nil {
+		if _, err := w.Write(cached.Body); err != nil {
 			log.WithField("error", err).Error("failed to write response")
 			// Don't send error response as headers are already written
 		}

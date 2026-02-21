@@ -1,0 +1,8 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "s3",
+    srcs = ["s3.go"],
+    importpath = "github.com/k3s-argocd-cluster/s3proxy/internal/cache",
+    visibility = ["//s3proxy:__subpackages__"],
+)

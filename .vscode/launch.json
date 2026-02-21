@@ -10,7 +10,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/s3proxy/cmd",
-            "args": ["--no-tls", "--level=-4", "--no-tagging"],
+            "args": ["--no-tls", "--level=-4", "--no-tagging", "--cache=memory"],
             "env": {
                 "AWS_ACCESS_KEY_ID": "YOUR_KEY_ID",
                 "AWS_SECRET_ACCESS_KEY": "YOUR_SECRET_ACCESS_KEY",

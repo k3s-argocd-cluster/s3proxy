@@ -1,4 +1,4 @@
-module github.com/intrinsec
+module github.com/k3s-argocd-cluster
 
 go 1.25.3
 

@@ -22,9 +22,9 @@ import (
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
-	"github.com/intrinsec/s3proxy/internal/config"
-	crypto "github.com/intrinsec/s3proxy/internal/crypto"
-	s3internal "github.com/intrinsec/s3proxy/internal/s3"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/config"
+	crypto "github.com/k3s-argocd-cluster/s3proxy/internal/crypto"
+	s3internal "github.com/k3s-argocd-cluster/s3proxy/internal/s3"
 	logger "github.com/sirupsen/logrus"
 )
 
