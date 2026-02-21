@@ -63,9 +63,11 @@ func addCaptureRawResponseDeserializeMiddleware() func(*middleware.Stack) error 
 			if resp, ok := out.RawResponse.(*smithyhttp.Response); ok {
 				// It is better not to clone the response body for successful responses
 				// because it can consume a lot of memory for large responses and we can not free it ASAP
-				shouldReturn, cperr := copyBody(resp, err)
-				if shouldReturn {
-					return out, metadata, cperr
+				if resp.StatusCode >= 400 {
+					shouldReturn, cperr := copyBody(resp, err)
+					if shouldReturn {
+						return out, metadata, cperr
+					}
 				}
 			} else {
 				metadata.Set(RawResponseKey{}, "")
