@@ -11,6 +11,7 @@
             "mode": "auto",
             "program": "${workspaceFolder}/s3proxy/cmd",
             "args": ["--no-tls", "--level=-1", "--no-tagging", "--cache=memory"],
+            "buildFlags": ["-race"],
             "env": {
                 "AWS_ACCESS_KEY_ID": "YOUR_KEY_ID",
                 "AWS_SECRET_ACCESS_KEY": "YOUR_SECRET_ACCESS_KEY",

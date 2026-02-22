@@ -9,64 +9,69 @@ package caching implements caching for repetitive s3 GET and HEAD requests
 package caching
 
 import (
+	"errors"
+	"sync"
+
 	logger "github.com/sirupsen/logrus"
 )
 
 // Store is an interface describing methods to persist data.
 type store interface {
-	Get(action Action, path string) (CacheElement, bool)
+	Get(action Action, path string) (CacheElement, bool, error)
 	Set(action Action, path string, element CacheElement)
 	ClearElements(path string)
 }
 
 func newStore(storeType string, _ *logger.Logger) store {
 	if storeType == "none" {
-		return noStore{}
+		return &noStore{}
 	}
 
-	return memoryStore{
-		elements: make(map[string]map[Action]CacheElement),
-	}
+	return &memoryStore{}
 }
 
 type memoryStore struct {
-	elements map[string]map[Action]CacheElement
+	elements sync.Map
 }
 
-func (c memoryStore) Get(action Action, path string) (CacheElement, bool) {
-	pathElements, ok := c.elements[path]
+func (c *memoryStore) Get(action Action, path string) (CacheElement, bool, error) {
+	raw, ok := c.elements.Load(path + "::" + string(action))
 	if ok {
-		result, ok := pathElements[action]
-		if ok {
-			return result, true
+		if raw == nil {
+			return CacheElementEmpty, true, errors.New("no cache element")
 		}
+
+		element, ok := raw.(CacheElement)
+		if !ok {
+			return element, true, errors.New("invalid cache element")
+		}
+
+		return element, true, nil
 	}
 
-	return CacheElement{}, false
+	return CacheElementEmpty, false, nil
 }
 
-func (c memoryStore) Set(action Action, path string, element CacheElement) {
-	pathElements, ok := c.elements[path]
-	if !ok {
-		pathElements = make(map[Action]CacheElement)
-		c.elements[path] = pathElements
+func (c *memoryStore) Set(action Action, path string, element CacheElement) {
+	c.elements.Store(path+"::"+string(action), element)
+}
+
+func (c *memoryStore) ClearElements(path string) {
+	actions := [2]Action{ActionHead, ActionGet}
+	for _, action := range actions {
+		c.elements.Delete(path + "::" + string(action))
 	}
-	pathElements[action] = element
-}
-
-func (c memoryStore) ClearElements(path string) {
-	delete(c.elements, path)
 }
 
 type noStore struct {
 }
 
-func (c noStore) Get(_ Action, _ string) (CacheElement, bool) {
-	return CacheElement{}, false
+func (c *noStore) Get(_ Action, _ string) (CacheElement, bool, error) {
+	return CacheElementEmpty, false, nil
 }
 
-func (c noStore) Set(_ Action, _ string, _ CacheElement) {
+func (c *noStore) Set(_ Action, _ string, _ CacheElement) {
 }
 
-func (c noStore) ClearElements(_ string) {
+func (c *noStore) ClearElements(_ string) {
 }

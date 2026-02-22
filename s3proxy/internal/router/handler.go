@@ -185,7 +185,7 @@ func handleForwards(client *s3.Client, cache caching.Cache, log *logger.Logger) 
 				return
 			}
 
-			if result.Desired {
+			if result.Desired && result.Element.StatusCode >= 200 && result.Element.StatusCode < 400 {
 				cache.Store(requestID, caching.Action(req.Method), result.Path, element)
 			}
 
@@ -216,7 +216,7 @@ func forward(log *logger.Logger, req *http.Request, client *s3.Client) (caching.
 	newReq, err := repackage(req)
 	if err != nil {
 		log.WithField("error", err).Error("failed to repackage request")
-		return caching.CacheElement{}, err
+		return caching.CacheElementEmpty, err
 	}
 
 	cfg := client.GetConfig()
@@ -224,7 +224,7 @@ func forward(log *logger.Logger, req *http.Request, client *s3.Client) (caching.
 	creds, err := cfg.Credentials.Retrieve(context.TODO())
 	if err != nil {
 		log.WithField("error", err).Error("unable to retrieve aws creds")
-		return caching.CacheElement{}, err
+		return caching.CacheElementEmpty, err
 	}
 
 	signer := v4.NewSigner()
@@ -232,14 +232,14 @@ func forward(log *logger.Logger, req *http.Request, client *s3.Client) (caching.
 	err = signer.SignHTTP(context.TODO(), creds, newReq, newReq.Header.Get("X-Amz-Content-Sha256"), "s3", cfg.Region, time.Now())
 	if err != nil {
 		log.WithField("error", err).Error("failed to sign request")
-		return caching.CacheElement{}, err
+		return caching.CacheElementEmpty, err
 	}
 
 	httpClient := http.DefaultClient
 	resp, err := httpClient.Do(newReq)
 	if err != nil {
 		log.WithField("error", err).Error("do request")
-		return caching.CacheElement{}, err
+		return caching.CacheElementEmpty, err
 	}
 	defer resp.Body.Close()
 
@@ -247,7 +247,7 @@ func forward(log *logger.Logger, req *http.Request, client *s3.Client) (caching.
 
 	if err != nil {
 		log.WithField("error", err).Error("failed to read response body")
-		return caching.CacheElement{}, err
+		return caching.CacheElementEmpty, err
 	}
 
 	header := http.Header{}

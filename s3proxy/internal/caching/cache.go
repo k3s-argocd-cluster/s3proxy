@@ -29,12 +29,16 @@ type CacheElement struct {
 	StatusCode int
 }
 
+var CacheElementEmpty = CacheElement{}
+
 type CacheGetResult struct {
 	Desired      bool
 	Path         string
 	ElementFound bool
 	Element      CacheElement
 }
+
+var CacheGetResultEmpty = CacheGetResult{}
 
 // Store is an interface describing methods to persist data.
 type Cache interface {
@@ -61,7 +65,7 @@ func (c defaultCache) GetFromCache(requestID string, req *http.Request) (CacheGe
 	if prefix != "" {
 		decoded, err := url.QueryUnescape(prefix)
 		if err != nil {
-			return CacheGetResult{}, err
+			return CacheGetResultEmpty, err
 		}
 		path += decoded
 	}
@@ -80,10 +84,13 @@ func (c defaultCache) GetFromCache(requestID string, req *http.Request) (CacheGe
 
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
 		log.Debug("not a method for caching")
-		return CacheGetResult{}, nil
+		return CacheGetResultEmpty, nil
 	}
 
-	element, found := c.store.Get(Action(req.Method), path)
+	element, found, err := c.store.Get(Action(req.Method), path)
+	if err != nil {
+		return CacheGetResultEmpty, err
+	}
 
 	log = log.WithField("found", found)
 	if found {
@@ -120,6 +127,7 @@ func (c defaultCache) Store(requestID string, action Action, path string, elemen
 			"path":      path,
 		}).Debug("store element to cache")
 	}
+
 	c.store.Set(action, adjustPath(path), element)
 }
 
