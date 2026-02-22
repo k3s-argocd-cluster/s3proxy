@@ -41,11 +41,12 @@ S3Proxy acts as an intermediary, intercepting S3 PUT and GET requests to provide
 
 - **PUT Object Flow:**
   1. S3Proxy intercepts a PUT request.
-  2. A random Data Encryption Key (DEK) is generated.
-  3. The object's data is encrypted using AES-256-GCM with this DEK.
-  4. The DEK itself is encrypted using a Key Encryption Key (KEK), derived from the `S3PROXY_ENCRYPT_KEY` environment variable.
-  5. This encrypted DEK is stored as a metadata tag (named `isec` by default, configurable via `S3PROXY_DEKTAG_NAME`) on the S3 object.
-  6. The encrypted data is then forwarded to the S3 provider.
+  2. Any cached element on the PUT path (and its parent) is being purged
+  3. A random Data Encryption Key (DEK) is generated.
+  4. The object's data is encrypted using AES-256-GCM with this DEK.
+  5. The DEK itself is encrypted using a Key Encryption Key (KEK), derived from the `S3PROXY_ENCRYPT_KEY` environment variable.
+  6. This encrypted DEK is stored as a metadata tag (named `isec` by default, configurable via `S3PROXY_DEKTAG_NAME`) on the S3 object.
+  7. The encrypted data is then forwarded to the S3 provider.
 
 - **GET Object Flow:**
   1. S3Proxy intercepts a GET request.
@@ -54,11 +55,19 @@ S3Proxy acts as an intermediary, intercepting S3 PUT and GET requests to provide
   4. The object's data is decrypted using the recovered DEK.
   5. The plaintext data is returned to the client.
 
+- **FORWARD Flow:**
+  1. Anything that wasn't identified a S3 GetObject or PutObject command will be forwarded without encryption
+  2. If incoming request is either Put, Post, Patch or Delete purge any cached element for given path (and its parent)
+  3. If caching was enabled, try to retrieve the cached data (Header, Body, StatusCode) for given path and method from cache
+  4. If not cached yet or method is not applicable for caching or caching is not enabled, manipulate request (i.e. make use of configured credentials) & forward to S3 backend
+  5. If caching was enabled & method is applicable for caching, store Header, Body & StatusCode for given path & method
+
 Key components and their roles:
 - `cmd/main.go`: The entry point of the application, responsible for parsing command-line flags, setting up logging (`logrus`), loading configuration (`koanf`), and starting the HTTP server.
 - `internal/router`: Implements the core request interception and routing logic. It dispatches requests to appropriate handlers based on the HTTP method and URL path, distinguishing between `GetObject`, `PutObject`, and other S3 operations. It also handles health endpoints (`/healthz`, `/readyz`) and applies optional request throttling. All AWS requests are re-signed before being forwarded to the S3 backend to comply with AWS signature requirements.
 - `internal/s3`: Provides a thin wrapper around the AWS S3 client (`github.com/aws/aws-sdk-go-v2/service/s3`) for seamless interaction with the S3 backend. It includes custom middleware to capture raw HTTP responses, which is crucial for robust error handling.
 - `internal/crypto`: Contains the cryptographic functions for encryption and decryption. It utilizes `github.com/tink-crypto/tink-go/v2` for AES-256-GCM for data encryption and Key Wrapping (KWP) for DEK encryption.
+- `internal/caching`: Implements caching for repetitive GET and HEAD requests. Currently this is a very basic implementation using local memory only, may be extended to use Redis later on.
 
 By default, multipart upload requests (`CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload`) are blocked for enhanced security, but this behavior can be optionally configured to forward these requests via a command-line flag.
 
@@ -77,7 +86,7 @@ S3Proxy can be easily deployed on Kubernetes using its official Helm chart locat
 Key configurable parameters via `values.yaml` include:
 - `replicaCount`: Number of S3Proxy instances to run.
 - `image`: Docker image repository and tag for S3Proxy.
-- `args`: Command-line arguments passed to the S3Proxy binary (e.g., `--no-tls` to disable TLS, `--level` for log verbosity).
+- `args`: Command-line arguments passed to the S3Proxy binary (e.g., `--no-tls` to disable TLS, `--level` for log verbosity, `--no-tagging` for B2 compatibility, `--cache=memory` for local caching).
 - `cert`: Configuration for CertManager integration to automatically provision TLS certificates.
 - `config`: Settings for the S3 backend, including `host`, `throttling` (maximum requests per second), `accessKey`, `secretKey`, and `encryptKey` (the KEK).
 - `service`: Kubernetes Service configuration (defaults to `ClusterIP` on port `4433`).

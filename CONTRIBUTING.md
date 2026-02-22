@@ -7,24 +7,32 @@ To set up your development environment:
 1.  **Clone the repository:**
     ```bash
     git clone https://github.com/k3s-argocd-cluster/s3proxy.git
-    cd s3proxy
     ```
-2.  **Run a Docker container with Go:**
-    ```bash
-    docker run --rm -p 4433:4433 -v $PWD:/app -it golang:1.24.5 bash
-    ```
-    This command launches a Docker container with the specified Go version, mounts your current project directory (`$PWD`) to `/app` inside the container, and exposes port `4433`.
-3.  **Attach VSCode to the running container:**
-    -   In VSCode, use the "Attach to Running Container..." option.
-    -   Select the `golang` container.
-    -   Open the `/app` folder within the attached VSCode window. This allows you to develop within a consistent Go environment without installing Go directly on your host machine.
-4.  **Run the S3Proxy server:**
-    ```bash
-    go run s3proxy/cmd/main.go --no-tls --level=-4
-    ```
-    This command starts the S3Proxy server with TLS disabled and a debug log level.
+2.  **Open VSCode and make use of the devcontainer**
 
-### Example
+    You may review `.devcontainer/devcontainer.json` before, however, this only is
+    - downloading to the standard golang container, version 1.25.3
+    - exposing port 4433 to your internal network (in case you like to talk to your
+    debugging session from your internal network)
+    - installing the latest version golangci-lint for your convenience
+3.  **Adjust `.vscode/launch.json`**
+
+    I am not sharing my secrets, so you need to replace the placeholder values for
+    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3PROXY_HOST & S3PROXY_ENCRYPT_KEY.
+
+    You may want to adjust the args to match your setup. Default is to start s3proxy
+    with no TLS, log level Debug, B2 compatibility & local caching
+4.  **Start debugging**
+
+    From a terminal, you now may talk to your service:
+    ```bash
+    # Local file to be encrypted locally and then forwarded to S3
+    aws s3 cp test.img s3://[YOUR_BUCKET_NAME]/test.img --endpoint-url http://127.0.0.1:4433
+    # Fetch and decrypt a remote file to be stored locally
+    aws s3 cp s3://[YOUR_BUCKET_NAME]/test.img test.img --endpoint-url http://127.0.0.1:4433
+    ```
+
+### Of course, you can ignore the devcontainer and run manually
 
 ```bash
 git clone # or gh repo clone k3s-argocd-cluster/s3proxy
@@ -37,6 +45,8 @@ export S3PROXY_HOST=xxx
 export S3PROXY_ENCRYPT_KEY=toto
 go run s3proxy/cmd/main.go --no-tls --level=-4
 
+# In a different shell with aws cli installed (may be your local machine or another container) run i.e.
+export AWS_ENDPOINT_URL=http://127.0.0.1:4433
 echo "test" > test.txt
 aws s3 cp ./test.txt s3://bucket/
 aws s3 cp s3://bucket/test.txt ./test.txt
@@ -58,7 +68,7 @@ aws s3 rm s3://bucket/test.txt
 - `staticcheck`: A Go static analysis tool that finds bugs and performance issues.
 
 **How to Run:**
-To run the linter, execute the following command in your development environment:
+To run the linter, execute the following command in your development environment (when using the devcontainer this was already installed for you):
 ```bash
 golangci-lint run
 ```

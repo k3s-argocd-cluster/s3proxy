@@ -18,7 +18,13 @@ fullnameOverride: ""
 #  When disabling TLS, make sure to revisit liveness and readiness probes (and change from HTTPS to HTTP)
 # Can add "--cache=memory" if you want to cache some of the GET and HEAD requests locally
 #  In theory, this will reduce the amount of premium calls into backends such as BackBlaze
-args: ["--level=1"]
+# Must add "--level=?" to specify logging level. Available values are
+#  -2 = Tracing
+#  -1 = Debug
+#   0 = Info
+#   1 = Warning
+#   2 = Error
+args: ["--level=0"]
 
 cert: # From CertManager CRD
   enable: false
