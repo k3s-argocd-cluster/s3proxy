@@ -22,9 +22,9 @@ import (
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
-	"github.com/intrinsec/s3proxy/internal/config"
-	crypto "github.com/intrinsec/s3proxy/internal/crypto"
-	s3internal "github.com/intrinsec/s3proxy/internal/s3"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/config"
+	crypto "github.com/k3s-argocd-cluster/s3proxy/internal/crypto"
+	s3internal "github.com/k3s-argocd-cluster/s3proxy/internal/s3"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -170,7 +170,7 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 	}
 	// We do not need to keep data anymore. Because it can be gigabytes in size - free it ASAP
 	dataLen := len(o.data)
-	o.data = nil //nolint:ineffassign
+	o.data = nil //nolint:staticcheck
 	if dataLen >= freeOSMemoryThreshold {
 		debug.FreeOSMemory()
 	}

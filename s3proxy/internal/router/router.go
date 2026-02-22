@@ -32,8 +32,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/intrinsec/s3proxy/internal/config"
-	"github.com/intrinsec/s3proxy/internal/s3"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/caching"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/config"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/s3"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -51,6 +52,7 @@ type Router struct {
 	forwardMultipartReqs bool
 	tagging              bool
 	log                  *logger.Logger
+	cache                caching.Cache
 }
 
 // Function to generate a 32-byte array (KEK) from a string input using SHA-256
@@ -60,13 +62,20 @@ func generateKEKFromString(input string) [32]byte {
 }
 
 // New creates a new Router.
-func New(region string, forwardMultipartReqs bool, tagging bool, log *logger.Logger) (Router, error) {
+func New(region string, forwardMultipartReqs bool, tagging bool, cacheType string, log *logger.Logger) (Router, error) {
 	result, err := config.GetEncryptKey()
 	if err != nil {
 		return Router{}, err
 	}
 	kekArray := generateKEKFromString(result)
-	return Router{region: region, kek: kekArray, forwardMultipartReqs: forwardMultipartReqs, tagging: tagging, log: log}, nil
+	return Router{
+		region:               region,
+		kek:                  kekArray,
+		forwardMultipartReqs: forwardMultipartReqs,
+		tagging:              tagging,
+		cache:                caching.NewCache(cacheType, log),
+		log:                  log,
+	}, nil
 }
 
 // Serve implements the routing logic for the s3 proxy.
@@ -353,7 +362,7 @@ func (r Router) getHandler(req *http.Request, client s3Client, matchingPath bool
 
 	// Forward if path doesn't match
 	if !matchingPath {
-		return handleForwards(s3Client, r.log)
+		return handleForwards(s3Client, r.cache, r.log)
 	}
 
 	// Check multipart operations first (if not forwarding them)
@@ -369,12 +378,12 @@ func (r Router) getHandler(req *http.Request, client s3Client, matchingPath bool
 		}
 	case http.MethodPut:
 		if !isUnwantedPutEndpoint(req.Header, req.URL.Query()) {
-			return handlePutObject(s3Client, key, bucket, r.log)
+			return handlePutObject(s3Client, r.cache, key, bucket, r.log)
 		}
 	}
 
 	// Forward all other requests
-	return handleForwards(s3Client, r.log)
+	return handleForwards(s3Client, r.cache, r.log)
 }
 
 func (r Router) getMultipartHandler(req *http.Request) http.Handler {

@@ -17,8 +17,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/intrinsec/s3proxy/internal/config"
-	"github.com/intrinsec/s3proxy/internal/router"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/config"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/router"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -33,6 +33,8 @@ const (
 	defaultCertLocation = "/etc/s3proxy/certs"
 	// defaultLogLevel is the default log level.
 	defaultLogLevel = 0
+	// defaultCacheType is no caching at all.
+	defaultCacheType = "none"
 )
 
 func main() {
@@ -51,7 +53,9 @@ func main() {
 	log := logger.New()
 	// log.SetFormatter(&logger.JSONFormatter{})
 	switch {
-	case flags.logLevel <= -1:
+	case flags.logLevel < -1:
+		log.SetLevel(logger.TraceLevel)
+	case flags.logLevel == -1:
 		log.SetLevel(logger.DebugLevel)
 	case flags.logLevel == 0:
 		log.SetLevel(logger.InfoLevel)
@@ -84,7 +88,7 @@ func main() {
 func runServer(flags cmdFlags, log *logger.Logger) error {
 	log.WithField("ip", flags.ip).WithField("port", defaultPort).WithField("region", flags.region).Info("listening")
 
-	routerInstance, err := router.New(flags.region, flags.forwardMultipartReqs, !flags.noTagging, log)
+	routerInstance, err := router.New(flags.region, flags.forwardMultipartReqs, !flags.noTagging, flags.cacheType, log)
 	if err != nil {
 		return fmt.Errorf("creating router: %w", err)
 	}
@@ -139,6 +143,7 @@ func parseFlags() (cmdFlags, error) {
 	forwardMultipartReqs := flag.Bool("allow-multipart", false, "forward multipart requests to the target bucket; beware: this may store unencrypted data on AWS. See the documentation for more information")
 	level := flag.Int("level", defaultLogLevel, "log level")
 	noTagging := flag.Bool("no-tagging", false, "disable S3 object tagging (i.e. x-amz-tagging header), may be helpful for backends such as BackBlaze B2")
+	cacheType := flag.String("cache", defaultCacheType, "different caching types, currently 'none' or 'memory'")
 
 	flag.Parse()
 
@@ -162,6 +167,7 @@ func parseFlags() (cmdFlags, error) {
 		forwardMultipartReqs: *forwardMultipartReqs,
 		logLevel:             *level,
 		noTagging:            *noTagging,
+		cacheType:            *cacheType,
 	}, nil
 }
 
@@ -175,5 +181,6 @@ type cmdFlags struct {
 	noTagging            bool
 	// TODO(derpsteb): enable once we are on go 1.21.
 	// logLevel slog.Level
-	logLevel int
+	logLevel  int
+	cacheType string
 }
