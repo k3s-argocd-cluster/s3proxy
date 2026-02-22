@@ -170,7 +170,7 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 	}
 	// We do not need to keep data anymore. Because it can be gigabytes in size - free it ASAP
 	dataLen := len(o.data)
-	o.data = nil //nolint:ineffassign
+	o.data = nil //nolint:staticcheck
 	if dataLen >= freeOSMemoryThreshold {
 		debug.FreeOSMemory()
 	}

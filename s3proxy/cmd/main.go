@@ -53,7 +53,9 @@ func main() {
 	log := logger.New()
 	// log.SetFormatter(&logger.JSONFormatter{})
 	switch {
-	case flags.logLevel <= -1:
+	case flags.logLevel < -1:
+		log.SetLevel(logger.TraceLevel)
+	case flags.logLevel == -1:
 		log.SetLevel(logger.DebugLevel)
 	case flags.logLevel == 0:
 		log.SetLevel(logger.InfoLevel)

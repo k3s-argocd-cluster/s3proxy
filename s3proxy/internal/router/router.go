@@ -32,7 +32,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/k3s-argocd-cluster/s3proxy/internal/cache"
+	"github.com/k3s-argocd-cluster/s3proxy/internal/caching"
 	"github.com/k3s-argocd-cluster/s3proxy/internal/config"
 	"github.com/k3s-argocd-cluster/s3proxy/internal/s3"
 	logger "github.com/sirupsen/logrus"
@@ -52,7 +52,7 @@ type Router struct {
 	forwardMultipartReqs bool
 	tagging              bool
 	log                  *logger.Logger
-	cache                cache.Cache
+	cache                caching.Cache
 }
 
 // Function to generate a 32-byte array (KEK) from a string input using SHA-256
@@ -68,8 +68,14 @@ func New(region string, forwardMultipartReqs bool, tagging bool, cacheType strin
 		return Router{}, err
 	}
 	kekArray := generateKEKFromString(result)
-	cache, err := cache.NewCache(cacheType)
-	return Router{region: region, kek: kekArray, forwardMultipartReqs: forwardMultipartReqs, tagging: tagging, cache: *cache, log: log}, nil
+	return Router{
+		region:               region,
+		kek:                  kekArray,
+		forwardMultipartReqs: forwardMultipartReqs,
+		tagging:              tagging,
+		cache:                caching.NewCache(cacheType, log),
+		log:                  log,
+	}, nil
 }
 
 // Serve implements the routing logic for the s3 proxy.
