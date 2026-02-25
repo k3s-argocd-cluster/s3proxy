@@ -29,32 +29,34 @@ type CacheElement struct {
 	StatusCode int
 }
 
-var CacheElementEmpty = CacheElement{}
-
 type CacheGetResult struct {
-	Desired      bool
-	Path         string
-	ElementFound bool
-	Element      CacheElement
+	CachingDesired bool
+	Path           string
+	ElementFound   bool
+	Element        CacheElement
 }
 
-var CacheGetResultEmpty = CacheGetResult{}
-
-// Store is an interface describing methods to persist data.
 type Cache interface {
 	GetFromCache(requestID string, req *http.Request) (CacheGetResult, error)
-	Store(requestID string, action Action, path string, element CacheElement)
+	SaveToCache(requestID string, action Action, path string, element CacheElement)
 	RemoveFromCache(requestID string, path string)
 }
 
 type defaultCache struct {
-	store store
+	store CacheStore
 	log   *logger.Logger
 }
 
 func NewCache(cacheType string, log *logger.Logger) Cache {
+	return NewCacheWithStore(
+		newStore(cacheType, log),
+		log,
+	)
+}
+
+func NewCacheWithStore(store CacheStore, log *logger.Logger) Cache {
 	return defaultCache{
-		store: newStore(cacheType, log),
+		store: store,
 		log:   log,
 	}
 }
@@ -65,7 +67,7 @@ func (c defaultCache) GetFromCache(requestID string, req *http.Request) (CacheGe
 	if prefix != "" {
 		decoded, err := url.QueryUnescape(prefix)
 		if err != nil {
-			return CacheGetResultEmpty, err
+			return CacheGetResult{}, err
 		}
 		path += decoded
 	}
@@ -79,17 +81,17 @@ func (c defaultCache) GetFromCache(requestID string, req *http.Request) (CacheGe
 	})
 
 	if req.Method == http.MethodDelete || req.Method == http.MethodPatch || req.Method == http.MethodPost || req.Method == http.MethodPut {
-		c.removeFromCacheInternal(log, path)
+		removeFromCache(c, log, path)
 	}
 
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
 		log.Debug("not a method for caching")
-		return CacheGetResultEmpty, nil
+		return CacheGetResult{}, nil
 	}
 
 	element, found, err := c.store.Get(Action(req.Method), path)
 	if err != nil {
-		return CacheGetResultEmpty, err
+		return CacheGetResult{}, err
 	}
 
 	log = log.WithField("found", found)
@@ -103,14 +105,14 @@ func (c defaultCache) GetFromCache(requestID string, req *http.Request) (CacheGe
 	log.Trace("return from cache")
 
 	return CacheGetResult{
-		Desired:      true,
-		Path:         path,
-		ElementFound: found,
-		Element:      element,
+		CachingDesired: true,
+		Path:           path,
+		ElementFound:   found,
+		Element:        element,
 	}, nil
 }
 
-func (c defaultCache) Store(requestID string, action Action, path string, element CacheElement) {
+func (c defaultCache) SaveToCache(requestID string, action Action, path string, element CacheElement) {
 	if c.log.Level == logger.TraceLevel {
 		c.log.WithFields(logger.Fields{
 			"requestID":  requestID,
@@ -133,10 +135,10 @@ func (c defaultCache) Store(requestID string, action Action, path string, elemen
 
 func (c defaultCache) RemoveFromCache(requestID string, path string) {
 	path = adjustPath(path)
-	c.removeFromCacheInternal(c.log.WithField("requestID", requestID).WithField("path", path), path)
+	removeFromCache(c, c.log.WithField("requestID", requestID).WithField("path", path), path)
 }
 
-func (c defaultCache) removeFromCacheInternal(log *logger.Entry, path string) {
+func removeFromCache(c defaultCache, log *logger.Entry, path string) {
 	// remove any caches for the element itself
 	log.Debug("remove element")
 	c.store.ClearElements(path)

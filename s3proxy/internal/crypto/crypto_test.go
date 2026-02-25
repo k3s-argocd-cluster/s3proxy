@@ -43,6 +43,15 @@ func TestEncryptDecrypt(t *testing.T) {
 
 			// Verify that the decrypted plaintext matches the original plaintext
 			assert.Equal(t, tt.plaintext, decrypted, fmt.Sprintf("expected plaintext %s, got %s", tt.plaintext, decrypted))
+
+			// Simulate loss of or different KEK
+			wrongKek := [32]byte{}
+			_, err = rand.Read(wrongKek[:])
+			require.NoError(t, err)
+
+			// Decrypt the ciphertext using the KEK and encrypted DEK
+			_, err = Decrypt(ciphertext, encryptedDEK, wrongKek)
+			require.Error(t, err)
 		})
 	}
 }

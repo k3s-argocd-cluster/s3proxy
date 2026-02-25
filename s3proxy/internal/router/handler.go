@@ -34,7 +34,7 @@ func getKEK() ([32]byte, error) {
 
 func handleGetObject(client *s3.Client, key string, bucket string, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Debug("intercepting")
+		log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Info("intercepting")
 		if req.Header.Get("Range") != "" {
 			log.Error("GetObject Range header unsupported")
 			http.Error(w, "s3proxy currently does not support Range headers", http.StatusNotImplemented)
@@ -71,7 +71,7 @@ func handleGetObject(client *s3.Client, key string, bucket string, log *logger.L
 
 func handlePutObject(client *s3.Client, cache caching.Cache, key string, bucket string, log *logger.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Debug("intercepting")
+		log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Info("intercepting")
 
 		cache.RemoveFromCache(uuid.New().String(), req.URL.Path)
 
@@ -95,6 +95,8 @@ func handlePutObject(client *s3.Client, cache caching.Cache, key string, bucket 
 			http.Error(w, "failed to read request body", http.StatusInternalServerError)
 			return
 		}
+
+		defer req.Body.Close()
 
 		kek, err := getKEK()
 		if err != nil {
@@ -164,7 +166,6 @@ func handlePutObject(client *s3.Client, cache caching.Cache, key string, bucket 
 		}
 
 		put(obj.put)(w, req)
-		defer req.Body.Close()
 	}
 }
 
@@ -185,13 +186,13 @@ func handleForwards(client *s3.Client, cache caching.Cache, log *logger.Logger) 
 				return
 			}
 
-			if result.Desired && result.Element.StatusCode >= 200 && result.Element.StatusCode < 400 {
-				cache.Store(requestID, caching.Action(req.Method), result.Path, element)
+			if result.CachingDesired && result.Element.StatusCode >= 200 && result.Element.StatusCode < 400 {
+				cache.SaveToCache(requestID, caching.Action(req.Method), result.Path, element)
 			}
 
 			result.Element = element
 		} else {
-			log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Debug("from cache")
+			log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Info("from cache")
 		}
 
 		for key := range *result.Element.Header {
@@ -211,12 +212,12 @@ func handleForwards(client *s3.Client, cache caching.Cache, log *logger.Logger) 
 }
 
 func forward(log *logger.Logger, req *http.Request, client *s3.Client) (caching.CacheElement, error) {
-	log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Debug("forwarding")
+	log.WithField("path", req.URL.Path).WithField("method", req.Method).WithField("host", req.Host).Info("forwarding")
 
 	newReq, err := repackage(req)
 	if err != nil {
 		log.WithField("error", err).Error("failed to repackage request")
-		return caching.CacheElementEmpty, err
+		return caching.CacheElement{}, err
 	}
 
 	cfg := client.GetConfig()
@@ -224,30 +225,28 @@ func forward(log *logger.Logger, req *http.Request, client *s3.Client) (caching.
 	creds, err := cfg.Credentials.Retrieve(context.TODO())
 	if err != nil {
 		log.WithField("error", err).Error("unable to retrieve aws creds")
-		return caching.CacheElementEmpty, err
+		return caching.CacheElement{}, err
 	}
 
 	signer := v4.NewSigner()
 
-	err = signer.SignHTTP(context.TODO(), creds, newReq, newReq.Header.Get("X-Amz-Content-Sha256"), "s3", cfg.Region, time.Now())
-	if err != nil {
+	if err = signer.SignHTTP(context.TODO(), creds, newReq, newReq.Header.Get("X-Amz-Content-Sha256"), "s3", cfg.Region, time.Now()); err != nil {
 		log.WithField("error", err).Error("failed to sign request")
-		return caching.CacheElementEmpty, err
+		return caching.CacheElement{}, err
 	}
 
 	httpClient := http.DefaultClient
 	resp, err := httpClient.Do(newReq)
 	if err != nil {
 		log.WithField("error", err).Error("do request")
-		return caching.CacheElementEmpty, err
+		return caching.CacheElement{}, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
-
 	if err != nil {
 		log.WithField("error", err).Error("failed to read response body")
-		return caching.CacheElementEmpty, err
+		return caching.CacheElement{}, err
 	}
 
 	header := http.Header{}
@@ -255,13 +254,11 @@ func forward(log *logger.Logger, req *http.Request, client *s3.Client) (caching.
 		header.Add(key, resp.Header.Get(key))
 	}
 
-	element := caching.CacheElement{
+	return caching.CacheElement{
 		Header:     &header,
 		Body:       &body,
 		StatusCode: resp.StatusCode,
-	}
-
-	return element, nil
+	}, nil
 }
 
 // handleCreateMultipartUpload logs the request and blocks with an error message.

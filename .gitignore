@@ -1,5 +1,6 @@
 go.work.sum
 s3proxy/cmd/main
+s3proxy/cmd/main.exe
 
 # IDEs and editors
 .idea

@@ -135,15 +135,15 @@ func runServer(flags cmdFlags, log *logger.Logger) error {
 }
 
 func parseFlags() (cmdFlags, error) {
-	noTLS := flag.Bool("no-tls", false, "disable TLS and listen on port 80, otherwise listen on 443")
+	noTLS := flag.Bool("no-tls", false, "disable TLS")
 	ip := flag.String("ip", defaultIP, "ip to listen on")
 	region := flag.String("region", defaultRegion, "AWS region in which target bucket is located")
 	certLocation := flag.String("cert", defaultCertLocation, "location of TLS certificate")
-	kmsEndpoint := flag.String("kms", "key-service.kube-system:9000", "endpoint of the KMS service to get key encryption keys from")
 	forwardMultipartReqs := flag.Bool("allow-multipart", false, "forward multipart requests to the target bucket; beware: this may store unencrypted data on AWS. See the documentation for more information")
 	level := flag.Int("level", defaultLogLevel, "log level")
 	noTagging := flag.Bool("no-tagging", false, "disable S3 object tagging (i.e. x-amz-tagging header), may be helpful for backends such as BackBlaze B2")
 	cacheType := flag.String("cache", defaultCacheType, "different caching types, currently 'none' or 'memory'")
+	metrics := flag.Bool("metrics", false, "enable Prometheus metrics at port 9001 and path /metrics")
 
 	flag.Parse()
 
@@ -152,22 +152,16 @@ func parseFlags() (cmdFlags, error) {
 		return cmdFlags{}, fmt.Errorf("not a valid IPv4 address: %s", *ip)
 	}
 
-	// TODO(derpsteb): enable once we are on go 1.21.
-	// logLevel := new(slog.Level)
-	// if err := logLevel.UnmarshalText([]byte(*level)); err != nil {
-	// 	return cmdFlags{}, fmt.Errorf("parsing log level: %w", err)
-	// }
-
 	return cmdFlags{
 		noTLS:                *noTLS,
 		ip:                   netIP.String(),
 		region:               *region,
 		certLocation:         *certLocation,
-		kmsEndpoint:          *kmsEndpoint,
 		forwardMultipartReqs: *forwardMultipartReqs,
 		logLevel:             *level,
 		noTagging:            *noTagging,
 		cacheType:            *cacheType,
+		metrics:              *metrics,
 	}, nil
 }
 
@@ -176,11 +170,9 @@ type cmdFlags struct {
 	ip                   string
 	region               string
 	certLocation         string
-	kmsEndpoint          string
 	forwardMultipartReqs bool
 	noTagging            bool
-	// TODO(derpsteb): enable once we are on go 1.21.
-	// logLevel slog.Level
-	logLevel  int
-	cacheType string
+	logLevel             int
+	cacheType            string
+	metrics              bool
 }

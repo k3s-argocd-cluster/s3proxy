@@ -16,16 +16,12 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"fmt"
-	"io"
-	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/aws/smithy-go/middleware"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 	configs3proxy "github.com/k3s-argocd-cluster/s3proxy/internal/config"
 )
 
@@ -34,114 +30,6 @@ type Client struct {
 	s3client *s3.Client
 	s3config *aws.Config
 	tagging  bool
-}
-
-type RawResponseKey struct{}
-
-type ErrorRawResponse struct {
-	err         error
-	RawResponse string
-}
-
-func (m *ErrorRawResponse) Unwrap() error {
-	return m.err
-}
-
-func (m *ErrorRawResponse) Error() string {
-	return m.RawResponse
-}
-
-// Middleware to capture the raw response in the Send phase by cloning and storing the response body
-func addCaptureRawResponseDeserializeMiddleware() func(*middleware.Stack) error {
-	return func(stack *middleware.Stack) error {
-		return stack.Deserialize.Add(middleware.DeserializeMiddlewareFunc("CaptureRawResponseDeserialize", func(
-			ctx context.Context, in middleware.DeserializeInput, next middleware.DeserializeHandler,
-		) (
-			out middleware.DeserializeOutput, metadata middleware.Metadata, err error,
-		) {
-			out, metadata, err = next.HandleDeserialize(ctx, in)
-			if resp, ok := out.RawResponse.(*smithyhttp.Response); ok {
-				// It is better not to clone the response body for successful responses
-				// because it can consume a lot of memory for large responses and we can not free it ASAP
-				if resp.StatusCode >= 400 {
-					shouldReturn, cperr := copyBody(resp, err)
-					if shouldReturn {
-						return out, metadata, cperr
-					}
-				}
-			} else {
-				metadata.Set(RawResponseKey{}, "")
-			}
-			return out, metadata, err
-		}), middleware.After)
-	}
-}
-
-func copyBody(resp *smithyhttp.Response, err error) (bool, error) {
-	var bodyBytes []byte
-
-	if cl := resp.Header.Get("Content-Length"); cl != "" {
-		if n64, perr := strconv.ParseInt(cl, 10, 64); perr == nil && n64 >= 0 {
-			n := int(n64)
-			bodyBytes = make([]byte, n)
-			// Preallocate the buffer from Content-Length and fill it with io.ReadFull.
-			// This avoids the incremental growth and extra copies that io.ReadAll incurs
-			// when the final size is unknown, which can blow up RAM on large payloads.
-			// If Content-Length is missing or bogus we fall back to ReadAll below.
-			if _, rerr := io.ReadFull(resp.Body, bodyBytes); rerr != nil {
-				wrap := fmt.Errorf("capture raw response (prealloc) failed: %w", rerr)
-				if err != nil {
-					return true, fmt.Errorf("%v; original deserialize error: %w", wrap, err)
-				}
-				return true, wrap
-			}
-		}
-	}
-
-	if bodyBytes == nil {
-		// Fallback: previous behavior (unbounded ReadAll).
-		// NOTE: this may allocate for large bodies; we only use it when CL is missing/invalid.
-		b, rerr := io.ReadAll(resp.Body)
-		if rerr != nil {
-			wrap := fmt.Errorf("capture raw response (ReadAll) failed: %w", rerr)
-			if err != nil {
-				return true, fmt.Errorf("%v; original deserialize error: %w", wrap, err)
-			}
-			return true, wrap
-		}
-		bodyBytes = b
-	}
-
-	// Restore the original body for further processing
-	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	return false, nil
-}
-
-func addCaptureRawResponseInitializeMiddleware() func(*middleware.Stack) error {
-	return func(stack *middleware.Stack) error {
-		return stack.Initialize.Add(middleware.InitializeMiddlewareFunc("CaptureRawResponseInitialize", func(
-			ctx context.Context, in middleware.InitializeInput, next middleware.InitializeHandler,
-		) (
-			out middleware.InitializeOutput, metadata middleware.Metadata, err error,
-		) {
-			out, metadata, err = next.HandleInitialize(ctx, in)
-
-			if err != nil {
-				return out, metadata, &ErrorRawResponse{
-					err: err,
-					RawResponse: func() string {
-						if val, ok := metadata.Get(RawResponseKey{}).(string); ok {
-							return val
-						}
-						return ""
-					}(),
-				}
-			}
-
-			return out, metadata, err
-
-		}), middleware.After)
-	}
 }
 
 // NewClient creates a new AWS S3 client.
@@ -167,8 +55,6 @@ func NewClient(region string, tagging bool) (*Client, error) {
 		o.BaseEndpoint = aws.String("https://" + host)
 		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
-		o.APIOptions = append(o.APIOptions, addCaptureRawResponseDeserializeMiddleware())
-		o.APIOptions = append(o.APIOptions, addCaptureRawResponseInitializeMiddleware())
 	})
 
 	return &Client{s3client: client, s3config: &clientCfg, tagging: tagging}, nil

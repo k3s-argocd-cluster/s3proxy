@@ -14,7 +14,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -24,7 +23,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/k3s-argocd-cluster/s3proxy/internal/config"
 	crypto "github.com/k3s-argocd-cluster/s3proxy/internal/crypto"
-	s3internal "github.com/k3s-argocd-cluster/s3proxy/internal/s3"
 	logger "github.com/sirupsen/logrus"
 )
 
@@ -55,8 +53,6 @@ type object struct {
 	log                       *logger.Logger
 }
 
-const freeOSMemoryThreshold int = 100 * 1024 * 1024 // 100 MiB
-
 func setHeaderIfNonEmpty(h http.Header, key string, val *string) {
 	if val != nil {
 		v := strings.TrimSpace(*val)
@@ -77,69 +73,68 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// log with Info as it might be expected behavior (e.g. object not found).
 		o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject sending request to S3")
-
 		handleGetObjectError(w, err, requestID, o.log)
 		return
 	}
 
 	setGetObjectHeaders(w, output)
 
-	var body []byte
-	if output.ContentLength == nil {
-		// fallback on io.ReadAll if ContentLength is unknown
-		body, err = io.ReadAll(output.Body)
-		if err != nil {
-			o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject reading S3 response")
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+	plaintext := func() (result []byte) {
+		var body []byte
+		if output.ContentLength == nil {
+			// fallback on io.ReadAll if ContentLength is unknown
+			body, err = io.ReadAll(output.Body)
+			if err != nil {
+				o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject reading S3 response")
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return nil
+			}
+		} else {
+			n := int(*output.ContentLength)
+			// Preallocate the buffer from Content-Length and fill it with io.ReadFull.
+			// This avoids the incremental growth and extra copies that io.ReadAll incurs
+			// when the final size is unknown, which can blow up RAM on large payloads.
+			// If Content-Length is missing or bogus we fall back to ReadAll below.
+			body = make([]byte, n)
+			if _, err := io.ReadFull(output.Body, body); err != nil {
+				o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject reading S3 response")
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return nil
+			}
 		}
-	} else {
-		n := int(*output.ContentLength)
-		// Preallocate the buffer from Content-Length and fill it with io.ReadFull.
-		// This avoids the incremental growth and extra copies that io.ReadAll incurs
-		// when the final size is unknown, which can blow up RAM on large payloads.
-		// If Content-Length is missing or bogus we fall back to ReadAll below.
-		body = make([]byte, n)
-		if _, err := io.ReadFull(output.Body, body); err != nil {
-			o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject reading S3 response")
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
 
-	plaintext := body
-	rawEncryptedDEK, ok := output.Metadata[dekTag]
+		result = body
+		rawEncryptedDEK, ok := output.Metadata[dekTag]
+		if ok {
+			encryptedDEK, err := hex.DecodeString(rawEncryptedDEK)
+			if err != nil {
+				o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject decoding DEK")
+				http.Error(w, "failed to decode encryption key", http.StatusInternalServerError)
+				return nil
+			}
+
+			result, err = crypto.Decrypt(body, encryptedDEK, o.kek)
+			if err != nil {
+				o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject decrypting response")
+				http.Error(w, "failed to decrypt object", http.StatusInternalServerError)
+				return nil
+			}
+		} else {
+			o.log.Warn("WTF ?!") // <-- TODO: Do we really want this?!
+		}
+
+		return result
+	}()
+
 	defer output.Body.Close()
-	if ok {
-		encryptedDEK, err := hex.DecodeString(rawEncryptedDEK)
-		if err != nil {
-			o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject decoding DEK")
-			http.Error(w, "failed to decode encryption key", http.StatusInternalServerError)
-			return
-		}
 
-		plaintext, err = crypto.Decrypt(body, encryptedDEK, o.kek)
-		// We do not need to keep body anymore. Because it can be gigabytes in size - free it ASAP
-		bodyLen := len(body)
-		body = nil //nolint:ineffassign
-		if bodyLen >= freeOSMemoryThreshold {
-			debug.FreeOSMemory()
-		}
-		if err != nil {
-			o.log.WithField("requestID", requestID).WithField("error", err).Error("GetObject decrypting response")
-			http.Error(w, "failed to decrypt object", http.StatusInternalServerError)
-			return
-		}
+	if plaintext == nil {
+		return
 	}
 
-	plaintextLen := len(plaintext)
 	select {
 	case <-r.Context().Done():
 		o.log.WithField("requestID", requestID).Info("Request was canceled by client")
-		plaintext = nil //nolint:ineffassign
-		if plaintextLen >= freeOSMemoryThreshold {
-			debug.FreeOSMemory()
-		}
 		return
 	default:
 		w.WriteHeader(http.StatusOK)
@@ -151,14 +146,10 @@ func (o object) get(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	plaintext = nil //nolint:ineffassign
-	if plaintextLen >= freeOSMemoryThreshold {
-		debug.FreeOSMemory()
-	}
 }
 
 // put is a http.HandlerFunc that implements the PUT method for objects.
-func (o object) put(w http.ResponseWriter, r *http.Request) {
+func (o *object) put(w http.ResponseWriter, r *http.Request) {
 	requestID := uuid.New().String()
 	o.log.WithField("requestID", requestID).WithField("key", o.key).WithField("bucket", o.bucket).Debug("putObject")
 
@@ -168,12 +159,10 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// We do not need to keep data anymore. Because it can be gigabytes in size - free it ASAP
-	dataLen := len(o.data)
-	o.data = nil //nolint:staticcheck
-	if dataLen >= freeOSMemoryThreshold {
-		debug.FreeOSMemory()
-	}
+
+	// as data was just encrypted, the raw data is not required any more
+	// so remove the reference and let the GC do its job
+	o.data = nil
 	o.metadata[dekTag] = hex.EncodeToString(encryptedDEK)
 
 	output, err := o.client.PutObject(context.WithoutCancel(r.Context()), o.bucket, o.key, o.tags, o.contentType, o.objectLockLegalHoldStatus, o.objectLockMode, o.sseCustomerAlgorithm, o.sseCustomerKey, o.sseCustomerKeyMD5, o.objectLockRetainUntilDate, o.metadata, ciphertext)
@@ -182,7 +171,6 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &httpResponseErr) {
 			code := httpResponseErr.HTTPStatusCode()
 			o.log.WithField("requestID", requestID).WithField("code", code).WithField("httpResponseErr", httpResponseErr).Error("PutObject sending request to S3")
-
 			http.Error(w, err.Error(), code)
 			return
 		}
@@ -192,11 +180,6 @@ func (o object) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cipherTextLen := len(ciphertext)
-	ciphertext = nil //nolint:ineffassign
-	if cipherTextLen > freeOSMemoryThreshold {
-		debug.FreeOSMemory()
-	}
 	setPutObjectHeaders(w, output)
 
 	w.WriteHeader(http.StatusOK)
@@ -230,20 +213,13 @@ func handleGetObjectError(w http.ResponseWriter, err error, requestID string, lo
 	if errors.As(err, &httpResponseErr) {
 		code := httpResponseErr.HTTPStatusCode()
 		log.WithField("requestID", requestID).WithField("code", code).WithField("httpResponseErr", httpResponseErr).Error("GetObject sending request to S3 (awshttp.ResponseError)")
-		if code != 0 {
-			var s3internalErr *s3internal.ErrorRawResponse
-			if errors.As(err, &s3internalErr) {
-				http.Error(w, s3internalErr.Error(), code)
-			} else {
-				http.Error(w, err.Error(), code)
-			}
-			for key := range httpResponseErr.Response.Header {
-				w.Header().Set(key, httpResponseErr.Response.Header.Get(key))
-			}
-			return
+		http.Error(w, err.Error(), code)
+		for key := range httpResponseErr.Response.Header {
+			w.Header().Set(key, httpResponseErr.Response.Header.Get(key))
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+
+	http.Error(w, err.Error(), http.StatusInternalServerError)
 }
 
 func setGetObjectHeaders(w http.ResponseWriter, output *s3.GetObjectOutput) {

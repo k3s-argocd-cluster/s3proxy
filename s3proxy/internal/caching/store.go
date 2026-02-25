@@ -16,13 +16,13 @@ import (
 )
 
 // Store is an interface describing methods to persist data.
-type store interface {
+type CacheStore interface {
 	Get(action Action, path string) (CacheElement, bool, error)
 	Set(action Action, path string, element CacheElement)
 	ClearElements(path string)
 }
 
-func newStore(storeType string, _ *logger.Logger) store {
+func newStore(storeType string, _ *logger.Logger) CacheStore {
 	if storeType == "none" {
 		return &noStore{}
 	}
@@ -35,10 +35,9 @@ type memoryStore struct {
 }
 
 func (c *memoryStore) Get(action Action, path string) (CacheElement, bool, error) {
-	raw, ok := c.elements.Load(path + "::" + string(action))
-	if ok {
+	if raw, ok := c.elements.Load(path + "::" + string(action)); ok {
 		if raw == nil {
-			return CacheElementEmpty, true, errors.New("no cache element")
+			return CacheElement{}, true, errors.New("no cache element")
 		}
 
 		element, ok := raw.(CacheElement)
@@ -49,7 +48,7 @@ func (c *memoryStore) Get(action Action, path string) (CacheElement, bool, error
 		return element, true, nil
 	}
 
-	return CacheElementEmpty, false, nil
+	return CacheElement{}, false, nil
 }
 
 func (c *memoryStore) Set(action Action, path string, element CacheElement) {
@@ -67,7 +66,7 @@ type noStore struct {
 }
 
 func (c *noStore) Get(_ Action, _ string) (CacheElement, bool, error) {
-	return CacheElementEmpty, false, nil
+	return CacheElement{}, false, nil
 }
 
 func (c *noStore) Set(_ Action, _ string, _ CacheElement) {

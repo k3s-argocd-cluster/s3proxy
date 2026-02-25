@@ -29,4 +29,4 @@ COPY --from=build-stage /app/s3proxy/cmd/main /app/isec-s3proxy
 EXPOSE 4433
 USER 1001
 ENTRYPOINT ["/app/isec-s3proxy"]
-CMD ["--level=-4", "--no-tls"]
+CMD ["--level=0", "--no-tls"]
