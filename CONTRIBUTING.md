@@ -14,7 +14,11 @@ To set up your development environment:
     - downloading to the standard golang container, version 1.25.3
     - exposing port 4433 to your internal network (in case you like to talk to your
     debugging session from your internal network)
-    - installing the latest version golangci-lint for your convenience
+    - adding VSCode docker-outside-of-docker feature (so that our testcontainers can make use
+    of your local Docker Desktop)
+    - installing the latest version of golangci-lint for your convenience
+    - installing the latest version of github.com/go-delve/delve/cmd/dlv (so Go debugging works)
+    - upgrading the devcontainer shell to zsh & adding oh-my-zsh + oh-my-posh
 3.  **Adjust `.vscode/launch.json`**
 
     I am not sharing my secrets, so you need to replace the placeholder values for

@@ -9,7 +9,7 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/s3proxy/cmd",
+            "program": "${workspaceFolder}/s3proxy/cmd/main.go",
             "args": ["--no-tls", "--level=-1", "--no-tagging", "--cache=memory"],
             "buildFlags": ["-race"],
             "env": {
