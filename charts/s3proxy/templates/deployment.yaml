@@ -73,6 +73,16 @@ spec:
           - name: S3PROXY_THROTTLING_REQUESTSMAX
             value: {{ .Values.config.throttling | quote }}
           {{- end }}
+          {{- if .Values.goRuntime.goMemLimit.enabled }}
+          - name: GOMEMLIMIT
+            {{- if .Values.goRuntime.goMemLimit.value }}
+            value: {{ .Values.goRuntime.goMemLimit.value | quote }}
+            {{- else }}
+            valueFrom:
+              resourceFieldRef:
+                resource: {{ .Values.goRuntime.goMemLimit.source | quote }}
+            {{- end }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}

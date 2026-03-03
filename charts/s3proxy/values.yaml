@@ -31,8 +31,9 @@ args:
 cert: # From CertManager CRD
   enable: false
   issuerRefKind: ClusterIssuer
-  # issuerRefName: internal-company-com
-  # commonName: "*.s3proxy.internal.company.com"
+  issuerRefName: ""
+  commonName: ""
+  dnsName: ""
 
 config:
   host: s3.us-east-1.amazonaws.com
@@ -67,14 +68,26 @@ service:
 
 ingress:
   enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
 
-resources:
-  limits:
-    cpu: 500m
-    memory: 256Mi
-  requests:
-    cpu: 250m
-    memory: 128Mi
+resources: {}
+#  limits:
+#    cpu: 500m
+#    memory: 256Mi
+#  requests:
+#    cpu: 250m
+#    memory: 128Mi
+
+goRuntime:
+  goMemLimit:
+    enabled: false
+    # Recommended: limits.memory. Alternative: requests.memory.
+    source: limits.memory
+    # If set, this value takes precedence over source, e.g. "200Mi".
+    value: ""
 
 livenessProbe:
   httpGet:
