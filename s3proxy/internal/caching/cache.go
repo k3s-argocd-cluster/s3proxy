@@ -10,7 +10,6 @@ package caching
 
 import (
 	"net/http"
-	"net/url"
 	"strings"
 
 	logger "github.com/sirupsen/logrus"
@@ -66,11 +65,7 @@ func (c defaultCache) GetFromCache(requestID string, req *http.Request) (CacheGe
 	path := req.URL.Path
 	prefix := req.URL.Query().Get("prefix")
 	if prefix != "" {
-		decoded, err := url.QueryUnescape(prefix)
-		if err != nil {
-			return CacheGetResult{}, err
-		}
-		path += decoded
+		path = joinPathWithPrefix(path, prefix)
 	}
 
 	path = adjustPath(path)
@@ -165,4 +160,13 @@ func adjustPath(path string) string {
 	}
 
 	return path
+}
+
+func joinPathWithPrefix(path, prefix string) string {
+	path = adjustPath(path)
+	normalizedPrefix := strings.TrimLeft(prefix, "/")
+	if normalizedPrefix == "" {
+		return path
+	}
+	return path + "/" + normalizedPrefix
 }
