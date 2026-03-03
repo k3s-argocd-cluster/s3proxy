@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/hmac"
+	"crypto/hkdf"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -22,6 +22,11 @@ const (
 	contextDelim    = "\x00"
 	requiredCtxBuck = "bucket"
 	requiredCtxKey  = "key"
+
+	wrappedBlobHeaderLen  = 1
+	wrappedBlobFormatV1   = byte(1)
+	wrappingKDFHKDFSHA256 = "hkdf-sha256"
+	wrappingKDFVersionV1  = "v1"
 )
 
 // StaticKMSClient is a local KMS implementation that wraps generated data keys using a static master key.
@@ -70,7 +75,7 @@ func (s *StaticKMSClient) Decrypt(_ context.Context, in *kms.DecryptInput, _ ...
 	if err := validateEncryptionContext(in.EncryptionContext); err != nil {
 		return nil, err
 	}
-	if len(in.CiphertextBlob) <= nonceSize {
+	if len(in.CiphertextBlob) <= wrappedBlobHeaderLen+nonceSize {
 		return nil, fmt.Errorf("ciphertext blob is invalid")
 	}
 
@@ -128,17 +133,47 @@ func canonicalContext(ctx map[string]string) string {
 	return strings.Join(pairs, contextDelim)
 }
 
-func (s *StaticKMSClient) deriveWrappingKey(keyID string, ctx map[string]string) [32]byte {
-	mac := hmac.New(sha256.New, s.masterKey[:])
-	_, _ = mac.Write([]byte(keyID))
-	_, _ = mac.Write([]byte(contextDelim))
-	_, _ = mac.Write([]byte(canonicalContext(ctx)))
-	sum := mac.Sum(nil)
-	return [32]byte(sum)
+func derivationInfo(formatVersion byte, keyID string, ctx map[string]string) string {
+	return strings.Join([]string{
+		"s3proxy-static-kms",
+		fmt.Sprintf("format=%d", formatVersion),
+		"kdf=" + wrappingKDFHKDFSHA256,
+		"kdf-version=" + wrappingKDFVersionV1,
+		"key-id=" + keyID,
+		canonicalContext(ctx),
+	}, contextDelim)
+}
+
+func wrappedBlobAAD(formatVersion byte, ctx map[string]string) []byte {
+	return []byte(strings.Join([]string{
+		fmt.Sprintf("format=%d", formatVersion),
+		"kdf=" + wrappingKDFHKDFSHA256,
+		"kdf-version=" + wrappingKDFVersionV1,
+		canonicalContext(ctx),
+	}, contextDelim))
+}
+
+func (s *StaticKMSClient) deriveWrappingKey(formatVersion byte, keyID string, ctx map[string]string) ([32]byte, error) {
+	var wrappingKey [32]byte
+	switch formatVersion {
+	case wrappedBlobFormatV1:
+		key, err := hkdf.Key(sha256.New, s.masterKey[:], nil, derivationInfo(formatVersion, keyID, ctx), len(wrappingKey))
+		if err != nil {
+			return [32]byte{}, err
+		}
+		copy(wrappingKey[:], key)
+		return wrappingKey, nil
+	default:
+		return [32]byte{}, fmt.Errorf("unsupported wrapped data key format version: %d", formatVersion)
+	}
 }
 
 func (s *StaticKMSClient) wrapDataKey(plaintext []byte, keyID string, ctx map[string]string) ([]byte, error) {
-	wrappingKey := s.deriveWrappingKey(keyID, ctx)
+	formatVersion := wrappedBlobFormatV1
+	wrappingKey, err := s.deriveWrappingKey(formatVersion, keyID, ctx)
+	if err != nil {
+		return nil, err
+	}
 	block, err := aes.NewCipher(wrappingKey[:])
 	if err != nil {
 		return nil, err
@@ -153,13 +188,25 @@ func (s *StaticKMSClient) wrapDataKey(plaintext []byte, keyID string, ctx map[st
 		return nil, err
 	}
 
-	aad := []byte(canonicalContext(ctx))
+	aad := wrappedBlobAAD(formatVersion, ctx)
 	ciphertext := gcm.Seal(nil, nonce, plaintext, aad)
-	return append(nonce, ciphertext...), nil
+	blob := make([]byte, wrappedBlobHeaderLen+nonceSize+len(ciphertext))
+	blob[0] = formatVersion
+	copy(blob[wrappedBlobHeaderLen:], nonce)
+	copy(blob[wrappedBlobHeaderLen+nonceSize:], ciphertext)
+	return blob, nil
 }
 
 func (s *StaticKMSClient) unwrapDataKey(ciphertextBlob []byte, keyID string, ctx map[string]string) ([]byte, error) {
-	wrappingKey := s.deriveWrappingKey(keyID, ctx)
+	if len(ciphertextBlob) <= wrappedBlobHeaderLen+nonceSize {
+		return nil, fmt.Errorf("ciphertext blob is invalid")
+	}
+
+	formatVersion := ciphertextBlob[0]
+	wrappingKey, err := s.deriveWrappingKey(formatVersion, keyID, ctx)
+	if err != nil {
+		return nil, err
+	}
 	block, err := aes.NewCipher(wrappingKey[:])
 	if err != nil {
 		return nil, err
@@ -169,9 +216,9 @@ func (s *StaticKMSClient) unwrapDataKey(ciphertextBlob []byte, keyID string, ctx
 		return nil, err
 	}
 
-	nonce := ciphertextBlob[:nonceSize]
-	ciphertext := ciphertextBlob[nonceSize:]
-	aad := []byte(canonicalContext(ctx))
+	nonce := ciphertextBlob[wrappedBlobHeaderLen : wrappedBlobHeaderLen+nonceSize]
+	ciphertext := ciphertextBlob[wrappedBlobHeaderLen+nonceSize:]
+	aad := wrappedBlobAAD(formatVersion, ctx)
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, aad)
 	if err != nil {
 		return nil, err

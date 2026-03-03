@@ -2,7 +2,6 @@ package encryption
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"io"
 	"time"
@@ -103,7 +102,6 @@ func withEncryptionContext(ctx context.Context, bucket, key string) context.Cont
 	encryptionContext := map[string]string{
 		"bucket": bucket,
 		"key":    key,
-		"scope":  fmt.Sprintf("%x", sha256.Sum256([]byte(bucket+"/"+key))),
 	}
 	//nolint:staticcheck // Required by the AWS encryption client API: key type is a string constant.
 	return context.WithValue(ctx, s3crypto.EncryptionContext, encryptionContext)
