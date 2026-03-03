@@ -22,7 +22,7 @@ To set up your development environment:
 3.  **Adjust `.vscode/launch.json`**
 
     I am not sharing my secrets, so you need to replace the placeholder values for
-    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3PROXY_HOST & S3PROXY_ENCRYPT_KEY.
+    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3PROXY_HOST & S3PROXY_KMS_STATIC_KEY.
 
     You may want to adjust the args to match your setup. Default is to start s3proxy
     with no TLS, log level Debug, B2 compatibility & local caching
@@ -46,7 +46,7 @@ docker run --rm -p 4433:4433 -v $PWD:/app -it golang:1.25.3 bash
 export AWS_ACCESS_KEY_ID=xxx
 export AWS_SECRET_ACCESS_KEY=xxx
 export S3PROXY_HOST=xxx
-export S3PROXY_ENCRYPT_KEY=toto
+export S3PROXY_KMS_STATIC_KEY=toto
 go run s3proxy/cmd/main.go --no-tls --level=-4
 
 # In a different shell with aws cli installed (may be your local machine or another container) run i.e.

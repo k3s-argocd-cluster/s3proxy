@@ -7,13 +7,13 @@ import (
 
 // ValidateConfiguration validates all required configuration at startup
 func ValidateConfiguration() error {
-	// Validate encryption key
-	encryptKey, err := GetEncryptKey()
+	// Validate KMS static key
+	kmsStaticKey, err := GetKMSStaticKey()
 	if err != nil {
-		return fmt.Errorf("validating encryption key: %w", err)
+		return fmt.Errorf("validating KMS static key: %w", err)
 	}
-	if encryptKey == "" {
-		return fmt.Errorf("encryption key cannot be empty")
+	if kmsStaticKey == "" {
+		return fmt.Errorf("KMS static key cannot be empty")
 	}
 
 	// Validate host configuration

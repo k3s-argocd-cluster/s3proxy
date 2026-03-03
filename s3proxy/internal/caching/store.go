@@ -19,7 +19,8 @@ import (
 type CacheStore interface {
 	Get(action Action, path string) (CacheElement, bool, error)
 	Set(action Action, path string, element CacheElement)
-	ClearElements(path string)
+	ClearElements(path string) int64
+	Stats() Stats
 }
 
 func newStore(storeType string, _ *logger.Logger) CacheStore {
@@ -55,11 +56,39 @@ func (c *memoryStore) Set(action Action, path string, element CacheElement) {
 	c.elements.Store(path+"::"+string(action), element)
 }
 
-func (c *memoryStore) ClearElements(path string) {
+func (c *memoryStore) ClearElements(path string) int64 {
+	var removed int64
 	actions := [2]Action{ActionHead, ActionGet}
 	for _, action := range actions {
-		c.elements.Delete(path + "::" + string(action))
+		if _, ok := c.elements.LoadAndDelete(path + "::" + string(action)); ok {
+			removed++
+		}
 	}
+	return removed
+}
+
+func (c *memoryStore) Stats() Stats {
+	stats := Stats{}
+	c.elements.Range(func(_, value any) bool {
+		stats.Entries++
+		element, ok := value.(CacheElement)
+		if !ok {
+			return true
+		}
+		if element.Body != nil {
+			stats.Bytes += int64(len(*element.Body))
+		}
+		if element.Header != nil {
+			for k, values := range *element.Header {
+				stats.Bytes += int64(len(k))
+				for _, v := range values {
+					stats.Bytes += int64(len(v))
+				}
+			}
+		}
+		return true
+	})
+	return stats
 }
 
 type noStore struct {
@@ -72,5 +101,10 @@ func (c *noStore) Get(_ Action, _ string) (CacheElement, bool, error) {
 func (c *noStore) Set(_ Action, _ string, _ CacheElement) {
 }
 
-func (c *noStore) ClearElements(_ string) {
+func (c *noStore) ClearElements(_ string) int64 {
+	return 0
+}
+
+func (c *noStore) Stats() Stats {
+	return Stats{}
 }

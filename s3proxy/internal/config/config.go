@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/knadh/koanf"
@@ -25,20 +26,15 @@ func GetHostConfig() (string, error) {
 	return k.String("s3proxy.host"), nil
 }
 
-func GetDekTagName() string {
-	// If the key "s3proxy.dektag.name" does not exist, return a default value
-	if !k.Exists("s3proxy.dektag.name") {
-		return "isec"
+func GetKMSStaticKey() (string, error) {
+	if !k.Exists("s3proxy.kms.static.key") {
+		return "", errors.New("unable to get 'S3PROXY_KMS_STATIC_KEY' env var")
 	}
-	return k.String("s3proxy.dektag.name")
-}
-
-func GetEncryptKey() (string, error) {
-	// Ensure loading was successful before calling Get
-	if !k.Exists("s3proxy.encrypt.key") {
-		return "", errors.New("unable to get 'S3PROXY_ENCRYPT_KEY' env var")
+	value := strings.TrimSpace(k.String("s3proxy.kms.static.key"))
+	if value == "" {
+		return "", fmt.Errorf("'S3PROXY_KMS_STATIC_KEY' cannot be empty")
 	}
-	return k.String("s3proxy.encrypt.key"), nil
+	return value, nil
 }
 
 func GetThrottlingRequestsMax() int {

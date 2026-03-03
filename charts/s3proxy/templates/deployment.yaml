@@ -36,7 +36,21 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
-            {{- toYaml .Values.args | nindent 12 }}
+            {{- if .Values.args.rawOverride }}
+            {{- toYaml .Values.args.rawOverride | nindent 12 }}
+            {{- else }}
+            - --level={{ .Values.args.logLevel }}
+            - --cache={{ .Values.args.cache }}
+            {{- if .Values.args.noTLS }}
+            - --no-tls
+            {{- end }}
+            {{- if .Values.args.noTagging }}
+            - --no-tagging
+            {{- end }}
+            {{- with .Values.args.extra }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- end }}
           env:
           - name: AWS_ACCESS_KEY_ID
             valueFrom:
@@ -48,11 +62,11 @@ spec:
               secretKeyRef:
                 name: {{ .Values.config.existentSecret | default "s3proxy" }}
                 key: secretkey
-          - name: S3PROXY_ENCRYPT_KEY
+          - name: S3PROXY_KMS_STATIC_KEY
             valueFrom:
               secretKeyRef:
                 name: {{ .Values.config.existentSecret | default "s3proxy" }}
-                key: encryptkey
+                key: kmsstatickey
           - name: S3PROXY_HOST
             value: {{ .Values.config.host | quote }}
           {{- if .Values.config.throttling }}
@@ -62,6 +76,9 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
+              protocol: TCP
+            - name: ops
+              containerPort: {{ .Values.service.opsPort }}
               protocol: TCP
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}

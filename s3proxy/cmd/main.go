@@ -10,21 +10,21 @@ Package main parses command line flags and starts the s3proxy server.
 package main
 
 import (
-	"crypto/tls"
+	"context"
 	"flag"
 	"fmt"
 	"net"
-	"net/http"
-	"time"
 
+	"github.com/k3s-argocd-cluster/s3proxy/internal/app"
 	"github.com/k3s-argocd-cluster/s3proxy/internal/config"
-	"github.com/k3s-argocd-cluster/s3proxy/internal/router"
 	logger "github.com/sirupsen/logrus"
 )
 
 const (
-	// defaultPort is the default port to listen on.
-	defaultPort = 4433
+	// defaultDataPort is the default data port to listen on.
+	defaultDataPort = 4433
+	// defaultOpsPort is the default operations port to listen on.
+	defaultOpsPort = 9001
 	// defaultIP is the default IP to listen on.
 	defaultIP = "0.0.0.0"
 	// defaultRegion is the default AWS region to use.
@@ -43,15 +43,7 @@ func main() {
 		panic(err)
 	}
 
-	// logLevel can be made a public variable so logging level can be changed dynamically.
-	// TODO (derpsteb): enable once we are on go 1.21.
-	// logLevel := new(slog.LevelVar)
-	// handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})
-	// logger := slog.New(handler)
-	// logLevel.Set(flags.logLevel)
-
 	log := logger.New()
-	// log.SetFormatter(&logger.JSONFormatter{})
 	switch {
 	case flags.logLevel < -1:
 		log.SetLevel(logger.TraceLevel)
@@ -71,79 +63,34 @@ func main() {
 		panic(err)
 	}
 
-	// Validate configuration at startup
 	if err := config.ValidateConfiguration(); err != nil {
 		log.WithError(err).Fatal("configuration validation failed")
 	}
 
-	if flags.forwardMultipartReqs {
-		log.Warn("configured to forward multipart uploads, this may leak data to AWS")
-	}
-
-	if err := runServer(flags, log); err != nil {
+	if err := app.Run(context.Background(), app.Config{
+		NoTLS:        flags.noTLS,
+		IP:           flags.ip,
+		DataPort:     flags.dataPort,
+		OpsPort:      flags.opsPort,
+		Region:       flags.region,
+		CertLocation: flags.certLocation,
+		NoTagging:    flags.noTagging,
+		CacheType:    flags.cacheType,
+	}, log); err != nil {
 		panic(err)
 	}
-}
-
-func runServer(flags cmdFlags, log *logger.Logger) error {
-	log.WithField("ip", flags.ip).WithField("port", defaultPort).WithField("region", flags.region).Info("listening")
-
-	routerInstance, err := router.New(flags.region, flags.forwardMultipartReqs, !flags.noTagging, flags.cacheType, log)
-	if err != nil {
-		return fmt.Errorf("creating router: %w", err)
-	}
-
-	h := http.HandlerFunc(routerInstance.Serve)
-	hMdw := h
-
-	throttling := config.GetThrottlingRequestsMax()
-	if throttling != 0 {
-		log.WithField("throttling_requestsmax", throttling).Info("Throttling is enable")
-		throttler := router.NewThrottlingMiddleware(throttling, 10*time.Second)
-		// Explicitly convert h to http.Handler so it can be used with Throttle
-		hMdw = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			throttler.Throttle(h).ServeHTTP(w, r)
-		})
-	}
-
-	server := http.Server{
-		Addr:    fmt.Sprintf("%s:%d", flags.ip, defaultPort),
-		Handler: hMdw,
-		// Disable HTTP/2. Serving HTTP/2 will cause some clients to use HTTP/2.
-		// It seems like AWS S3 does not support HTTP/2.
-		// Having HTTP/2 enabled will at least cause the aws-sdk-go V1 copy-object operation to fail.
-		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
-	}
-
-	// i.e. if TLS is enabled.
-	if !flags.noTLS {
-		cert, err := tls.LoadX509KeyPair(flags.certLocation+"/s3proxy.crt", flags.certLocation+"/s3proxy.key")
-		if err != nil {
-			return fmt.Errorf("loading TLS certificate: %w", err)
-		}
-
-		server.TLSConfig = &tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}
-
-		// TLSConfig is populated, so we can safely pass empty strings to ListenAndServeTLS.
-		return server.ListenAndServeTLS("", "")
-	}
-
-	log.Warn("TLS is disabled")
-	return server.ListenAndServe()
 }
 
 func parseFlags() (cmdFlags, error) {
 	noTLS := flag.Bool("no-tls", false, "disable TLS")
 	ip := flag.String("ip", defaultIP, "ip to listen on")
+	dataPort := flag.Int("port", defaultDataPort, "data port to listen on")
+	opsPort := flag.Int("ops-port", defaultOpsPort, "ops port for /metrics, /healthz and /readyz")
 	region := flag.String("region", defaultRegion, "AWS region in which target bucket is located")
 	certLocation := flag.String("cert", defaultCertLocation, "location of TLS certificate")
-	forwardMultipartReqs := flag.Bool("allow-multipart", false, "forward multipart requests to the target bucket; beware: this may store unencrypted data on AWS. See the documentation for more information")
 	level := flag.Int("level", defaultLogLevel, "log level")
 	noTagging := flag.Bool("no-tagging", false, "disable S3 object tagging (i.e. x-amz-tagging header), may be helpful for backends such as BackBlaze B2")
 	cacheType := flag.String("cache", defaultCacheType, "different caching types, currently 'none' or 'memory'")
-	metrics := flag.Bool("metrics", false, "enable Prometheus metrics at port 9001 and path /metrics")
 
 	flag.Parse()
 
@@ -153,26 +100,26 @@ func parseFlags() (cmdFlags, error) {
 	}
 
 	return cmdFlags{
-		noTLS:                *noTLS,
-		ip:                   netIP.String(),
-		region:               *region,
-		certLocation:         *certLocation,
-		forwardMultipartReqs: *forwardMultipartReqs,
-		logLevel:             *level,
-		noTagging:            *noTagging,
-		cacheType:            *cacheType,
-		metrics:              *metrics,
+		noTLS:        *noTLS,
+		ip:           netIP.String(),
+		dataPort:     *dataPort,
+		opsPort:      *opsPort,
+		region:       *region,
+		certLocation: *certLocation,
+		logLevel:     *level,
+		noTagging:    *noTagging,
+		cacheType:    *cacheType,
 	}, nil
 }
 
 type cmdFlags struct {
-	noTLS                bool
-	ip                   string
-	region               string
-	certLocation         string
-	forwardMultipartReqs bool
-	noTagging            bool
-	logLevel             int
-	cacheType            string
-	metrics              bool
+	noTLS        bool
+	ip           string
+	dataPort     int
+	opsPort      int
+	region       string
+	certLocation string
+	noTagging    bool
+	logLevel     int
+	cacheType    string
 }

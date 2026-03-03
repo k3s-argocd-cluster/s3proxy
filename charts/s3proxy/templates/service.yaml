@@ -11,5 +11,9 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    - port: {{ .Values.service.opsPort }}
+      targetPort: ops
+      protocol: TCP
+      name: ops
   selector:
     {{- include "s3proxy.selectorLabels" . | nindent 4 }}

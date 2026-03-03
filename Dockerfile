@@ -19,9 +19,8 @@ FROM busybox:1.36 AS build-release-stage
 WORKDIR /app
 # ENV AWS_ACCESS_KEY_ID="TEST"
 # ENV AWS_SECRET_ACCESS_KEY="TEST"
-# ENV S3PROXY_ENCRYPT_KEY="TEST"
+# ENV S3PROXY_KMS_STATIC_KEY="TEST"
 # ENV S3PROXY_HOST="TEST"
-# ENV S3PROXY_DEKTAG_NAME="isec"
 
 COPY --from=certs /etc/ssl/certs /etc/ssl/certs
 COPY --from=build-stage /app/s3proxy/cmd/main /app/isec-s3proxy

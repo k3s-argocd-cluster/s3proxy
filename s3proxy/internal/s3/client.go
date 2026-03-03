@@ -16,6 +16,8 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -50,9 +52,14 @@ func NewClient(region string, tagging bool) (*Client, error) {
 		return nil, fmt.Errorf("loading AWS S3 client config: %w", err)
 	}
 
+	baseEndpoint, err := normalizeBaseEndpoint(host)
+	if err != nil {
+		return nil, fmt.Errorf("normalizing host config: %w", err)
+	}
+
 	client := s3.NewFromConfig(clientCfg, func(o *s3.Options) {
 		o.UsePathStyle = true // Ensure "path-style" is used with MinIO
-		o.BaseEndpoint = aws.String("https://" + host)
+		o.BaseEndpoint = aws.String(baseEndpoint)
 		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
 	})
@@ -62,6 +69,10 @@ func NewClient(region string, tagging bool) (*Client, error) {
 
 func (c Client) GetConfig() *aws.Config {
 	return c.s3config
+}
+
+func (c Client) GetS3Client() *s3.Client {
+	return c.s3client
 }
 
 // GetObject returns the object with the given key from the given bucket.
@@ -134,4 +145,22 @@ func (c Client) PutObject(ctx context.Context, bucket, key, tags, contentType, o
 	}
 
 	return c.s3client.PutObject(ctx, putObjectInput)
+}
+
+func normalizeBaseEndpoint(host string) (string, error) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", fmt.Errorf("host cannot be empty")
+	}
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		parsed, err := url.Parse(host)
+		if err != nil {
+			return "", err
+		}
+		if parsed.Host == "" {
+			return "", fmt.Errorf("host is missing")
+		}
+		return parsed.Scheme + "://" + parsed.Host, nil
+	}
+	return "https://" + host, nil
 }

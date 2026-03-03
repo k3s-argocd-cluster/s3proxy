@@ -101,3 +101,24 @@ func TestSetGet(t *testing.T) {
 		}
 	}
 }
+
+func TestMemoryStore_ClearElementsAndStats(t *testing.T) {
+	store := &memoryStore{}
+	headers := http.Header{"Content-Type": []string{"text/plain"}}
+	bodyGet := []byte("abc")
+	bodyHead := []byte("def")
+
+	store.Set(ActionGet, "/path", CacheElement{Header: &headers, Body: &bodyGet, StatusCode: 200})
+	store.Set(ActionHead, "/path", CacheElement{Header: &headers, Body: &bodyHead, StatusCode: 200})
+
+	statsBefore := store.Stats()
+	require.Equal(t, int64(2), statsBefore.Entries)
+	require.Greater(t, statsBefore.Bytes, int64(0))
+
+	removed := store.ClearElements("/path")
+	require.Equal(t, int64(2), removed)
+
+	statsAfter := store.Stats()
+	require.Equal(t, int64(0), statsAfter.Entries)
+	require.Equal(t, int64(0), statsAfter.Bytes)
+}

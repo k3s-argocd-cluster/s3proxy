@@ -39,7 +39,8 @@ type CacheGetResult struct {
 type Cache interface {
 	GetFromCache(requestID string, req *http.Request) (CacheGetResult, error)
 	SaveToCache(requestID string, action Action, path string, element CacheElement)
-	RemoveFromCache(requestID string, path string)
+	RemoveFromCache(requestID string, path string) int64
+	Stats() Stats
 }
 
 type defaultCache struct {
@@ -81,7 +82,7 @@ func (c defaultCache) GetFromCache(requestID string, req *http.Request) (CacheGe
 	})
 
 	if req.Method == http.MethodDelete || req.Method == http.MethodPatch || req.Method == http.MethodPost || req.Method == http.MethodPut {
-		removeFromCache(c, log, path)
+		_ = removeFromCache(c, log, path)
 	}
 
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
@@ -133,23 +134,29 @@ func (c defaultCache) SaveToCache(requestID string, action Action, path string, 
 	c.store.Set(action, adjustPath(path), element)
 }
 
-func (c defaultCache) RemoveFromCache(requestID string, path string) {
+func (c defaultCache) RemoveFromCache(requestID string, path string) int64 {
 	path = adjustPath(path)
-	removeFromCache(c, c.log.WithField("requestID", requestID).WithField("path", path), path)
+	return removeFromCache(c, c.log.WithField("requestID", requestID).WithField("path", path), path)
 }
 
-func removeFromCache(c defaultCache, log *logger.Entry, path string) {
+func (c defaultCache) Stats() Stats {
+	return c.store.Stats()
+}
+
+func removeFromCache(c defaultCache, log *logger.Entry, path string) int64 {
+	var removed int64
 	// remove any caches for the element itself
 	log.Debug("remove element")
-	c.store.ClearElements(path)
+	removed += c.store.ClearElements(path)
 
 	// try to go one level up and remove any caches for the parent as well
 	last := strings.LastIndex(path, "/")
 	if last > 0 {
 		parent := path[0:last]
 		log.WithField("parent", parent).Debug("remove parent")
-		c.store.ClearElements(parent)
+		removed += c.store.ClearElements(parent)
 	}
+	return removed
 }
 
 func adjustPath(path string) string {
